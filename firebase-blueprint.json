@@ -1,0 +1,16 @@
+{
+  "entities": {
+    "users": {
+      "path": "users/{userId}",
+      "description": "User profiles authenticated via Google Sign-In",
+      "fields": {
+        "userId": { "type": "string", "required": true },
+        "email": { "type": "string", "required": true },
+        "displayName": { "type": "string", "required": false },
+        "photoUrl": { "type": "string", "required": false },
+        "createdAt": { "type": "timestamp", "required": true },
+        "updatedAt": { "type": "timestamp", "required": false }
+      }
+    }
+  }
+}

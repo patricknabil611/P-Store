@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">P Store</string>
+    <string name="settings_title">Settings</string>
+    <string name="update_all">Update all</string>
+    <string name="updates_available">%1$d updates available</string>
+    <string name="installed_label">Installed: %1$s</string>
+    <string name="not_installed">Not installed</string>
+    <string name="install_button">Install</string>
+    <string name="update_button">Update</string>
+    <string name="open_button">Open</string>
+    <string name="view_on_github">View on GitHub</string>
+    <string name="no_release_yet">No release yet</string>
+    <string name="repo_not_found">Repo not found or private</string>
+    <string name="rate_limit_reached">GitHub limit reached, try again later</string>
+    <string name="no_internet">No internet connection</string>
+    <string name="installed_success">Installed ✓</string>
+    <string name="signature_conflict_error">This update was signed with a different key. Uninstall the old version, then install again.</string>
+    <string name="different_app_error">This APK belongs to a different app.</string>
+    <string name="detect_apps">Detect my apps</string>
+    <string name="detect_apps_desc">Downloads latest APKs to extract package names, then deletes them</string>
+    <string name="background_checks">Background checks</string>
+    <string name="background_checks_desc">Check for updates every 12 hours over Wi-Fi/cellular</string>
+    <string name="clear_cache">Clear download cache</string>
+    <string name="reset">Reset</string>
+    <string name="permission_install_unknown_title">Permission required</string>
+    <string name="permission_install_unknown_message">P Store needs permission to install downloaded APKs. Please allow installs from this source in Settings.</string>
+</resources>
