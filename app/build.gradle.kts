@@ -65,9 +65,11 @@ android {
   }
 }
 
-base {
-  archivesName.set("P Store")
-}
+
+
+
+
+
 
 secrets {
   propertiesFileName = ".env"
