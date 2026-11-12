@@ -178,6 +178,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Compares installed version against the release.
+     * CRITICAL: Prioritizes the APK's internal versionName & versionCode
+     * when they differ from the GitHub release tag name!
+     */
+    private fun isUpdateAvailable(
+        installedVersionName: String?,
+        installedVersionCode: Long?,
+        isInstalled: Boolean,
+        release: ReleaseInfo?
+    ): Boolean {
+        if (!isInstalled || installedVersionName.isNullOrBlank() || release == null) {
+            return false
+        }
+
+        val effectiveTargetVersion = release.apkVersionName ?: release.version
+        val effectiveTargetCode = release.apkVersionCode
+
+        // If APK version name is known and matches installed version name:
+        if (release.apkVersionName != null) {
+            val cleanInstalled = VersionComparator.cleanVersion(installedVersionName)
+            val cleanApk = VersionComparator.cleanVersion(release.apkVersionName)
+            if (cleanInstalled.equals(cleanApk, ignoreCase = true)) {
+                // If version codes are both available, only update if APK code > installed code
+                if (effectiveTargetCode != null && installedVersionCode != null) {
+                    return effectiveTargetCode > installedVersionCode
+                }
+                return false
+            }
+        }
+
+        return VersionComparator.isUpdateAvailable(
+            installedVersionName = installedVersionName,
+            installedVersionCode = installedVersionCode,
+            latestVersionName = effectiveTargetVersion,
+            apkVersionCode = effectiveTargetCode
+        )
+    }
+
     private suspend fun loadInitialData() {
         val pm = context.packageManager
 
@@ -234,15 +273,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Load cached release from DataStore
-                val cachedRelease = dataStore.getCachedRelease(item.catalogApp.owner, item.catalogApp.repo).first()
+                var cachedRelease = dataStore.getCachedRelease(item.catalogApp.owner, item.catalogApp.repo).first()
 
-                val hasUpdate = if (cachedRelease != null && isInstalled && installedVer != null) {
-                    VersionComparator.isUpdateAvailable(
-                        installedVersionName = installedVer,
-                        installedVersionCode = installedCode,
-                        latestVersionName = cachedRelease.version
-                    )
-                } else false
+                // If cachedRelease has no apkVersionName yet, resolve from local APK or catalog known APK version
+                if (cachedRelease != null && cachedRelease.apkVersionName == null) {
+                    val localApk = downloadManager.getApkFile(item.catalogApp.owner, item.catalogApp.repo)
+                    if (localApk.exists()) {
+                        val details = installerHelper.readApkDetails(localApk)
+                        if (details != null) {
+                            cachedRelease = cachedRelease.copy(
+                                apkVersionName = details.versionName,
+                                apkVersionCode = details.versionCode
+                            )
+                            viewModelScope.launch {
+                                dataStore.saveApkVersion(item.catalogApp.owner, item.catalogApp.repo, details.versionName, details.versionCode)
+                            }
+                        }
+                    } else if (item.catalogApp.knownApkVersionName != null) {
+                        cachedRelease = cachedRelease.copy(
+                            apkVersionName = item.catalogApp.knownApkVersionName,
+                            apkVersionCode = item.catalogApp.knownApkVersionCode
+                        )
+                    }
+                }
+
+                val hasUpdate = isUpdateAvailable(
+                    installedVersionName = installedVer,
+                    installedVersionCode = installedCode,
+                    isInstalled = isInstalled,
+                    release = cachedRelease
+                )
 
                 item.copy(
                     packageName = savedPkg,
@@ -275,13 +335,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (_: PackageManager.NameNotFoundException) {}
                 }
 
-                val hasUpdate = if (item.latestRelease != null && isInstalled && installedVer != null) {
-                    VersionComparator.isUpdateAvailable(
-                        installedVersionName = installedVer,
-                        installedVersionCode = installedCode,
-                        latestVersionName = item.latestRelease.version
-                    )
-                } else false
+                val hasUpdate = isUpdateAvailable(
+                    installedVersionName = installedVer,
+                    installedVersionCode = installedCode,
+                    isInstalled = isInstalled,
+                    release = item.latestRelease
+                )
 
                 item.copy(
                     installedVersionName = installedVer,
@@ -316,20 +375,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val status = results[item.id] ?: item.releaseStatus
                     when (status) {
                         is ReleaseStatus.Success -> {
+                            val cachedApk = dataStore.getCachedRelease(item.catalogApp.owner, item.catalogApp.repo).first()
+                            val localApk = downloadManager.getApkFile(item.catalogApp.owner, item.catalogApp.repo)
+                            val inspectedDetails = if (localApk.exists()) installerHelper.readApkDetails(localApk) else null
+
+                            val resolvedApkVerName = inspectedDetails?.versionName
+                                ?: status.release.apkVersionName
+                                ?: cachedApk?.apkVersionName
+                                ?: item.catalogApp.knownApkVersionName
+                            val resolvedApkVerCode = inspectedDetails?.versionCode
+                                ?: status.release.apkVersionCode
+                                ?: cachedApk?.apkVersionCode
+                                ?: item.catalogApp.knownApkVersionCode
+
+                            val releaseWithApk = status.release.copy(
+                                apkVersionName = resolvedApkVerName,
+                                apkVersionCode = resolvedApkVerCode
+                            )
+
                             viewModelScope.launch {
-                                dataStore.saveCachedRelease(item.catalogApp.owner, item.catalogApp.repo, status.release)
+                                dataStore.saveCachedRelease(item.catalogApp.owner, item.catalogApp.repo, releaseWithApk)
                             }
-                            val hasUpdate = if (item.isInstalled && item.installedVersionName != null) {
-                                VersionComparator.isUpdateAvailable(
-                                    installedVersionName = item.installedVersionName,
-                                    installedVersionCode = item.installedVersionCode,
-                                    latestVersionName = status.release.version
-                                )
-                            } else false
+
+                            val hasUpdate = isUpdateAvailable(
+                                installedVersionName = item.installedVersionName,
+                                installedVersionCode = item.installedVersionCode,
+                                isInstalled = item.isInstalled,
+                                release = releaseWithApk
+                            )
 
                             item.copy(
-                                latestRelease = status.release,
-                                releaseStatus = status,
+                                latestRelease = releaseWithApk,
+                                releaseStatus = ReleaseStatus.Success(releaseWithApk),
                                 updateAvailable = hasUpdate
                             )
                         }
@@ -449,6 +526,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val detectedPackageName = details.packageName
             val savedPackage = item.packageName
+
+            // Save and update APK's internal version name and code
+            val apkVerName = details.versionName
+            val apkVerCode = details.versionCode
+            dataStore.saveApkVersion(item.catalogApp.owner, item.catalogApp.repo, apkVerName, apkVerCode)
+
+            val updatedRelease = (item.latestRelease ?: release).copy(
+                apkVersionName = apkVerName,
+                apkVersionCode = apkVerCode
+            )
+
+            val stillNeedsUpdate = isUpdateAvailable(
+                installedVersionName = item.installedVersionName,
+                installedVersionCode = item.installedVersionCode,
+                isInstalled = item.isInstalled,
+                release = updatedRelease
+            )
+
+            _apps.update { list ->
+                list.map {
+                    if (it.id == item.id) it.copy(
+                        latestRelease = updatedRelease,
+                        updateAvailable = stillNeedsUpdate
+                    ) else it
+                }
+            }
 
             if (savedPackage.isNullOrBlank()) {
                 // First time downloaded: save package name automatically in DataStore!
@@ -583,6 +686,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (app.catalogApp.isSelf) {
                     dataStore.savePackageName(app.catalogApp.owner, app.catalogApp.repo, context.packageName)
+                    dataStore.saveApkVersion(
+                        app.catalogApp.owner,
+                        app.catalogApp.repo,
+                        com.example.BuildConfig.VERSION_NAME,
+                        com.example.BuildConfig.VERSION_CODE.toLong()
+                    )
                     detectedCount++
                     continue
                 }
@@ -605,6 +714,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val details = installerHelper.readApkDetails(apkFile)
                         if (details != null) {
                             dataStore.savePackageName(app.catalogApp.owner, app.catalogApp.repo, details.packageName)
+                            dataStore.saveApkVersion(app.catalogApp.owner, app.catalogApp.repo, details.versionName, details.versionCode)
                             detectedCount++
                         }
                         apkFile.delete()

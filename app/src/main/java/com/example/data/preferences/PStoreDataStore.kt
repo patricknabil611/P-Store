@@ -44,6 +44,12 @@ class PStoreDataStore(private val context: Context) {
 
         fun releaseRawDateKey(owner: String, repo: String) =
             stringPreferencesKey("rel_rawdate_${owner.lowercase()}_${repo.lowercase()}")
+
+        fun releaseApkVersionKey(owner: String, repo: String) =
+            stringPreferencesKey("rel_apkver_${owner.lowercase()}_${repo.lowercase()}")
+
+        fun releaseApkCodeKey(owner: String, repo: String) =
+            longPreferencesKey("rel_apkcode_${owner.lowercase()}_${repo.lowercase()}")
     }
 
     val backgroundChecksEnabled: Flow<Boolean> = context.pStoreDataStore.data.map { prefs ->
@@ -96,7 +102,9 @@ class PStoreDataStore(private val context: Context) {
                     apkSize = prefs[releaseSizeKey(owner, repo)] ?: 0L,
                     body = prefs[releaseBodyKey(owner, repo)] ?: "",
                     publishedAt = prefs[releaseDateKey(owner, repo)] ?: "",
-                    rawPublishedAt = prefs[releaseRawDateKey(owner, repo)] ?: ""
+                    rawPublishedAt = prefs[releaseRawDateKey(owner, repo)] ?: "",
+                    apkVersionName = prefs[releaseApkVersionKey(owner, repo)],
+                    apkVersionCode = prefs[releaseApkCodeKey(owner, repo)]
                 )
             } else {
                 null
@@ -112,6 +120,19 @@ class PStoreDataStore(private val context: Context) {
             prefs[releaseBodyKey(owner, repo)] = release.body
             prefs[releaseDateKey(owner, repo)] = release.publishedAt
             prefs[releaseRawDateKey(owner, repo)] = release.rawPublishedAt
+            release.apkVersionName?.let { prefs[releaseApkVersionKey(owner, repo)] = it }
+            release.apkVersionCode?.let { prefs[releaseApkCodeKey(owner, repo)] = it }
+        }
+    }
+
+    suspend fun saveApkVersion(owner: String, repo: String, apkVersionName: String?, apkVersionCode: Long?) {
+        context.pStoreDataStore.edit { prefs ->
+            if (apkVersionName != null) {
+                prefs[releaseApkVersionKey(owner, repo)] = apkVersionName
+            }
+            if (apkVersionCode != null) {
+                prefs[releaseApkCodeKey(owner, repo)] = apkVersionCode
+            }
         }
     }
 

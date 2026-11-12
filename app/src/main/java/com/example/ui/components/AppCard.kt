@@ -167,8 +167,13 @@ fun AppCard(
                         is ReleaseStatus.Success -> {
                             val rel = status.release
                             val sizeFormatted = formatFileSize(rel.apkSize)
+                            val displayVer = if (rel.apkVersionName != null && !rel.apkVersionName.equals(rel.version, ignoreCase = true)) {
+                                "${rel.apkVersionName} (${rel.version})"
+                            } else {
+                                rel.apkVersionName ?: rel.version
+                            }
                             val infoLine = buildString {
-                                append("Latest: ${rel.version}")
+                                append("Latest: $displayVer")
                                 if (rel.publishedAt.isNotBlank()) append(" · ${rel.publishedAt}")
                                 if (sizeFormatted.isNotBlank()) append(" · $sizeFormatted")
                             }

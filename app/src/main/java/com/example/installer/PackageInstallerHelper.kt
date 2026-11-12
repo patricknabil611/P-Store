@@ -87,7 +87,8 @@ class PackageInstallerHelper(private val context: Context) {
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(expectedPackageName)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                // Set to USER_ACTION_UNSPECIFIED so the system can prompt the user for confirmation when needed
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_UNSPECIFIED)
             }
         }
 

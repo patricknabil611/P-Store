@@ -9,7 +9,9 @@ data class ReleaseInfo(
     val apkSize: Long,
     val body: String,
     val publishedAt: String,
-    val rawPublishedAt: String = ""
+    val rawPublishedAt: String = "",
+    val apkVersionName: String? = null,
+    val apkVersionCode: Long? = null
 )
 
 sealed interface ReleaseStatus {

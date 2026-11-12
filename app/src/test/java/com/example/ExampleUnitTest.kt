@@ -71,6 +71,27 @@ class ExampleUnitTest {
                 latestVersionName = "1.9.0"
             )
         )
+
+        // User case: GitHub release tagged "26.06.26.1", but APK is internally 2.5.0
+        // When comparing installed 2.5.0 against the actual APK version 2.5.0:
+        assertFalse(
+            VersionComparator.isUpdateAvailable(
+                installedVersionName = "2.5.0",
+                installedVersionCode = 25,
+                latestVersionName = "2.5.0",
+                apkVersionCode = 25
+            )
+        )
+
+        // When installed is older (2.4.0) than the APK (2.5.0):
+        assertTrue(
+            VersionComparator.isUpdateAvailable(
+                installedVersionName = "2.4.0",
+                installedVersionCode = 24,
+                latestVersionName = "2.5.0",
+                apkVersionCode = 25
+            )
+        )
     }
 
     @Test
