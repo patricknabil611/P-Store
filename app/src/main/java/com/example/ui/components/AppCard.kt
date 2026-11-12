@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -437,22 +438,46 @@ fun AppCard(
                                 }
                             }
                             else -> {
-                                // Installed & up-to-date
-                                FilledTonalButton(
-                                    onClick = onOpenClick,
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                    ),
-                                    modifier = Modifier.testTag("open_button_${item.catalogApp.repo}")
+                                // Installed & up-to-date: Open app with option to re-download APK
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Launch,
-                                        contentDescription = "Open app",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Open", fontWeight = FontWeight.SemiBold)
+                                    if (item.latestRelease != null) {
+                                        OutlinedButton(
+                                            onClick = onInstallOrUpdateClick,
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                            modifier = Modifier.testTag("redownload_button_${item.catalogApp.repo}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Download,
+                                                contentDescription = "Re-download APK",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Re-download",
+                                                style = MaterialTheme.typography.labelMedium
+                                            )
+                                        }
+                                    }
+
+                                    FilledTonalButton(
+                                        onClick = onOpenClick,
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        ),
+                                        modifier = Modifier.testTag("open_button_${item.catalogApp.repo}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Launch,
+                                            contentDescription = "Open app",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Open", fontWeight = FontWeight.SemiBold)
+                                    }
                                 }
                             }
                         }

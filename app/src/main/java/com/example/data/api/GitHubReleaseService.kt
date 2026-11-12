@@ -52,7 +52,47 @@ class GitHubReleaseService(
                         )
                     )
                 }
-                404 -> ReleaseStatus.RepoNotFound("Repo not found or private")
+                404 -> {
+                    // GitHub returns 404 for /releases/latest when no release has been published yet.
+                    // Fall back to querying /releases to distinguish between an accessible repo with no releases vs a missing/private repo.
+                    try {
+                        val allReleasesResponse = api.getReleases(owner, repo, perPage = 5)
+                        when (allReleasesResponse.code()) {
+                            200 -> {
+                                val releases = allReleasesResponse.body().orEmpty()
+                                if (releases.isEmpty()) {
+                                    ReleaseStatus.NoRelease("No releases published yet")
+                                } else {
+                                    // Check if any release (e.g. pre-release) contains an APK
+                                    val releaseWithApk = releases.firstOrNull { r ->
+                                        r.assets.any { it.name.endsWith(".apk", ignoreCase = true) }
+                                    }
+                                    if (releaseWithApk != null) {
+                                        val apkAsset = releaseWithApk.assets.first { it.name.endsWith(".apk", ignoreCase = true) }
+                                        ReleaseStatus.Success(
+                                            ReleaseInfo(
+                                                tagName = releaseWithApk.tagName,
+                                                version = VersionComparator.cleanVersion(releaseWithApk.tagName),
+                                                apkDownloadUrl = apkAsset.browserDownloadUrl,
+                                                apkSize = apkAsset.size,
+                                                body = releaseWithApk.body ?: "",
+                                                publishedAt = formatPublishedDate(releaseWithApk.publishedAt ?: ""),
+                                                rawPublishedAt = releaseWithApk.publishedAt ?: ""
+                                            )
+                                        )
+                                    } else {
+                                        ReleaseStatus.NoRelease("Release found, but no .apk asset attached")
+                                    }
+                                }
+                            }
+                            404 -> ReleaseStatus.RepoNotFound("Repo not found or private")
+                            403 -> ReleaseStatus.RateLimit("GitHub rate limit reached, try again later")
+                            else -> ReleaseStatus.NoRelease("No releases published yet")
+                        }
+                    } catch (e: Exception) {
+                        ReleaseStatus.NoRelease("No releases published yet")
+                    }
+                }
                 403 -> ReleaseStatus.RateLimit("GitHub limit reached, try again later")
                 else -> ReleaseStatus.Error("GitHub error (${response.code()})")
             }
