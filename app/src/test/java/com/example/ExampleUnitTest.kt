@@ -92,6 +92,33 @@ class ExampleUnitTest {
                 apkVersionCode = 25
             )
         )
+
+        // User explicit requirement: 26.06.26.1 -> 26.06.26.2 -> 26.06.26.3
+        val cmpPatch = VersionComparator.compareSemantic("26.06.26.2", "26.06.26.1")
+        assertTrue(cmpPatch != null && cmpPatch > 0)
+
+        val cmpPatch2 = VersionComparator.compareSemantic("26.06.26.3", "26.06.26.2")
+        assertTrue(cmpPatch2 != null && cmpPatch2 > 0)
+
+        // 26.06.26.1 is up to date with 26.06.26.1
+        assertFalse(
+            VersionComparator.isUpdateAvailable(
+                installedVersionName = "26.06.26.1",
+                installedVersionCode = 26062601L,
+                latestVersionName = "26.06.26.1",
+                apkVersionCode = 26062601L
+            )
+        )
+
+        // 26.06.26.2 is an update over 26.06.26.1
+        assertTrue(
+            VersionComparator.isUpdateAvailable(
+                installedVersionName = "26.06.26.1",
+                installedVersionCode = 26062601L,
+                latestVersionName = "26.06.26.2",
+                apkVersionCode = 26062602L
+            )
+        )
     }
 
     @Test

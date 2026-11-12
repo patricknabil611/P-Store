@@ -46,8 +46,8 @@ object AppCatalog {
             repo = "P-Store",
             isSelf = true, // P Store updates itself
             defaultPackageName = "com.patricknabil.pstore",
-            knownApkVersionName = "1.0",
-            knownApkVersionCode = 1L
+            knownApkVersionName = "26.06.26.1",
+            knownApkVersionCode = 26062601L
         )
     )
 }
