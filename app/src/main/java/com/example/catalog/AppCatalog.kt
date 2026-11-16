@@ -10,6 +10,7 @@ data class CatalogApp(
     val repo: String,
     val isSelf: Boolean = false,
     val defaultPackageName: String? = null,
+    val knownApkTagName: String? = null,
     val knownApkVersionName: String? = null,
     val knownApkVersionCode: Long? = null
 )
@@ -21,6 +22,7 @@ object AppCatalog {
             owner = "patricknabil611",
             repo = "Money-Map",
             defaultPackageName = "com.aistudio.moneymap.zqpjfl",
+            knownApkTagName = "26.06.26.1",
             knownApkVersionName = "2.5.0",
             knownApkVersionCode = 25L
         ),
@@ -29,14 +31,16 @@ object AppCatalog {
             owner = "patricknabil611",
             repo = "P-Task",
             defaultPackageName = "com.aistudio.todolist.zkvmrq",
-            knownApkVersionName = "4.0",
-            knownApkVersionCode = 4L
+            knownApkTagName = "26.06.26.4",
+            knownApkVersionName = "26.06.26.2",
+            knownApkVersionCode = 7L
         ),
         CatalogApp(
             name = "P Habits",
             owner = "patricknabil611",
             repo = "P-Habits",
             defaultPackageName = "com.aistudio.phabits.qvxrzt",
+            knownApkTagName = "26.06.26.1",
             knownApkVersionName = "4.0",
             knownApkVersionCode = 4L
         ),
@@ -46,8 +50,9 @@ object AppCatalog {
             repo = "P-Store",
             isSelf = true, // P Store updates itself
             defaultPackageName = "com.patricknabil.pstore",
-            knownApkVersionName = "26.06.26.1",
-            knownApkVersionCode = 26062601L
+            knownApkTagName = "26.06.26.2",
+            knownApkVersionName = "1.1",
+            knownApkVersionCode = 2L
         )
     )
 }

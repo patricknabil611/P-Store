@@ -72,7 +72,7 @@ class UpdateCheckWorker(
             val savedPackage = if (app.isSelf) {
                 appContext.packageName
             } else {
-                dataStore.getSavedPackageNameOnce(app.owner, app.repo)
+                dataStore.getSavedPackageNameOnce(app.owner, app.repo) ?: app.defaultPackageName
             }
 
             var installedVersionName: String? = null
@@ -91,12 +91,41 @@ class UpdateCheckWorker(
 
             when (val result = api.getLatestRelease(app.owner, app.repo)) {
                 is ReleaseStatus.Success -> {
-                    dataStore.saveCachedRelease(app.owner, app.repo, result.release)
-                    val hasUpdate = VersionComparator.isUpdateAvailable(
-                        installedVersionName = installedVersionName,
-                        installedVersionCode = installedVersionCode,
-                        latestVersionName = result.release.version
+                    val cachedRelease = dataStore.getCachedRelease(app.owner, app.repo).first()
+                    val isSameCachedRelease = cachedRelease != null &&
+                        cachedRelease.tagName == result.release.tagName &&
+                        cachedRelease.apkDownloadUrl == result.release.apkDownloadUrl
+                    val matchesKnownRelease = app.knownApkTagName != null &&
+                        result.release.tagName == app.knownApkTagName
+
+                    val resolvedApkVerName = result.release.apkVersionName
+                        ?: (if (isSameCachedRelease) cachedRelease?.apkVersionName else null)
+                        ?: (if (matchesKnownRelease) app.knownApkVersionName else null)
+                    val resolvedApkVerCode = result.release.apkVersionCode
+                        ?: (if (isSameCachedRelease) cachedRelease?.apkVersionCode else null)
+                        ?: (if (matchesKnownRelease) app.knownApkVersionCode else null)
+
+                    val releaseWithApk = result.release.copy(
+                        apkVersionName = resolvedApkVerName,
+                        apkVersionCode = resolvedApkVerCode
                     )
+                    dataStore.saveCachedRelease(app.owner, app.repo, releaseWithApk)
+
+                    val effectiveTargetVersion = resolvedApkVerName ?: releaseWithApk.version
+                    val hasUpdate = if (resolvedApkVerName != null &&
+                        VersionComparator.cleanVersion(installedVersionName)
+                            .equals(VersionComparator.cleanVersion(resolvedApkVerName), ignoreCase = true)
+                    ) {
+                        resolvedApkVerCode != null && installedVersionCode != null &&
+                            resolvedApkVerCode > installedVersionCode
+                    } else {
+                        VersionComparator.isUpdateAvailable(
+                            installedVersionName = installedVersionName,
+                            installedVersionCode = installedVersionCode,
+                            latestVersionName = effectiveTargetVersion,
+                            apkVersionCode = resolvedApkVerCode
+                        )
+                    }
                     if (hasUpdate) {
                         updateCount++
                     }

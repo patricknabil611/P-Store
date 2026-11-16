@@ -120,8 +120,16 @@ class PStoreDataStore(private val context: Context) {
             prefs[releaseBodyKey(owner, repo)] = release.body
             prefs[releaseDateKey(owner, repo)] = release.publishedAt
             prefs[releaseRawDateKey(owner, repo)] = release.rawPublishedAt
-            release.apkVersionName?.let { prefs[releaseApkVersionKey(owner, repo)] = it }
-            release.apkVersionCode?.let { prefs[releaseApkCodeKey(owner, repo)] = it }
+            if (release.apkVersionName != null) {
+                prefs[releaseApkVersionKey(owner, repo)] = release.apkVersionName
+            } else {
+                prefs.remove(releaseApkVersionKey(owner, repo))
+            }
+            if (release.apkVersionCode != null) {
+                prefs[releaseApkCodeKey(owner, repo)] = release.apkVersionCode
+            } else {
+                prefs.remove(releaseApkCodeKey(owner, repo))
+            }
         }
     }
 

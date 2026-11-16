@@ -1,17 +1,18 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,13 +25,11 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppActionState
@@ -52,6 +52,7 @@ import com.example.model.AppItemUiState
 import com.example.model.ReleaseStatus
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppCard(
     item: AppItemUiState,
@@ -65,7 +66,7 @@ fun AppCard(
     val cardTag = "app_card_${item.catalogApp.repo}"
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -77,7 +78,7 @@ fun AppCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(12.dp)
         ) {
             // Header Row: Icon, Titles, Installed Badge
             Row(
@@ -88,17 +89,19 @@ fun AppCard(
                     appName = item.catalogApp.name,
                     packageName = item.packageName,
                     isInstalled = item.isInstalled,
-                    size = 52.dp
+                    size = 44.dp
                 )
 
-                Spacer(modifier = Modifier.width(14.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = item.catalogApp.name,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (item.catalogApp.isSelf) {
                             Spacer(modifier = Modifier.width(6.dp))
@@ -219,7 +222,7 @@ fun AppCard(
             // Changelog section
             val changelog = item.latestRelease?.body
             if (!changelog.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 ChangelogView(
                     changelog = changelog,
                     isExpanded = item.isExpandedChangelog,
@@ -229,7 +232,7 @@ fun AppCard(
             }
 
             // Action / Progress State Area
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             when (val action = item.actionState) {
                 is AppActionState.Downloading -> {
@@ -381,16 +384,20 @@ fun AppCard(
                 }
 
                 is AppActionState.Idle -> {
-                    // Regular action buttons row
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    // Compact action row using FlowRow so buttons never squash on narrow screens
+                    FlowRow(
                         horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         // GitHub link
                         TextButton(
                             onClick = onGitHubClick,
-                            modifier = Modifier.testTag("github_link_${item.catalogApp.repo}")
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .align(Alignment.CenterVertically)
+                                .heightIn(min = 36.dp)
+                                .testTag("github_link_${item.catalogApp.repo}")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.OpenInNew,
@@ -399,28 +406,40 @@ fun AppCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "View on GitHub",
-                                style = MaterialTheme.typography.labelSmall
+                                text = "GitHub",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
 
-                        // Main Button (Install / Update / Open)
+                        // Main Button (Install / Update / Open + Re-download)
                         when {
                             item.updateAvailable -> {
                                 Button(
                                     onClick = onInstallOrUpdateClick,
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
                                     ),
-                                    modifier = Modifier.testTag("update_button_${item.catalogApp.repo}")
+                                    modifier = Modifier
+                                        .align(Alignment.CenterVertically)
+                                        .heightIn(min = 36.dp)
+                                        .testTag("update_button_${item.catalogApp.repo}")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Download,
                                         contentDescription = "Update app",
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Update", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = "Update",
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
                             !item.isInstalled -> {
@@ -428,60 +447,83 @@ fun AppCard(
                                 Button(
                                     onClick = onInstallOrUpdateClick,
                                     enabled = hasRelease,
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
                                     ),
-                                    modifier = Modifier.testTag("install_button_${item.catalogApp.repo}")
+                                    modifier = Modifier
+                                        .align(Alignment.CenterVertically)
+                                        .heightIn(min = 36.dp)
+                                        .testTag("install_button_${item.catalogApp.repo}")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Download,
                                         contentDescription = "Install app",
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Install", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = "Install",
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
                             else -> {
                                 // Installed & up-to-date: Open app with option to re-download APK
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.align(Alignment.CenterVertically)
                                 ) {
                                     if (item.latestRelease != null) {
                                         OutlinedButton(
                                             onClick = onInstallOrUpdateClick,
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                            modifier = Modifier.testTag("redownload_button_${item.catalogApp.repo}")
+                                            modifier = Modifier
+                                                .heightIn(min = 36.dp)
+                                                .testTag("redownload_button_${item.catalogApp.repo}")
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Download,
                                                 contentDescription = "Re-download APK",
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(15.dp)
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = "Re-download",
-                                                style = MaterialTheme.typography.labelMedium
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
 
-                                    FilledTonalButton(
+                                    Button(
                                         onClick = onOpenClick,
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
                                         ),
-                                        modifier = Modifier.testTag("open_button_${item.catalogApp.repo}")
+                                        modifier = Modifier
+                                            .heightIn(min = 36.dp)
+                                            .testTag("open_button_${item.catalogApp.repo}")
                                     ) {
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.Launch,
                                             contentDescription = "Open app",
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Open", fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = "Open",
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
                                     }
                                 }
                             }

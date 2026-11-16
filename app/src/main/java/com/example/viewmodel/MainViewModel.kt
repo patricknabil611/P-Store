@@ -275,7 +275,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Load cached release from DataStore
                 var cachedRelease = dataStore.getCachedRelease(item.catalogApp.owner, item.catalogApp.repo).first()
 
-                // If cachedRelease has no apkVersionName yet, resolve from local APK or catalog known APK version
+                // If cachedRelease has no apkVersionName yet, resolve from local APK or matching catalog known APK version
                 if (cachedRelease != null && cachedRelease.apkVersionName == null) {
                     val localApk = downloadManager.getApkFile(item.catalogApp.owner, item.catalogApp.repo)
                     if (localApk.exists()) {
@@ -289,7 +289,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 dataStore.saveApkVersion(item.catalogApp.owner, item.catalogApp.repo, details.versionName, details.versionCode)
                             }
                         }
-                    } else if (item.catalogApp.knownApkVersionName != null) {
+                    } else if (
+                        item.catalogApp.knownApkVersionName != null &&
+                        cachedRelease.tagName == item.catalogApp.knownApkTagName
+                    ) {
                         cachedRelease = cachedRelease.copy(
                             apkVersionName = item.catalogApp.knownApkVersionName,
                             apkVersionCode = item.catalogApp.knownApkVersionCode
@@ -376,17 +379,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     when (status) {
                         is ReleaseStatus.Success -> {
                             val cachedApk = dataStore.getCachedRelease(item.catalogApp.owner, item.catalogApp.repo).first()
+                            val isSameCachedRelease = cachedApk != null &&
+                                cachedApk.tagName == status.release.tagName &&
+                                cachedApk.apkDownloadUrl == status.release.apkDownloadUrl
+
                             val localApk = downloadManager.getApkFile(item.catalogApp.owner, item.catalogApp.repo)
-                            val inspectedDetails = if (localApk.exists()) installerHelper.readApkDetails(localApk) else null
+                            val inspectedDetails = if (isSameCachedRelease && localApk.exists()) {
+                                installerHelper.readApkDetails(localApk)
+                            } else {
+                                if (!isSameCachedRelease && localApk.exists()) {
+                                    localApk.delete()
+                                }
+                                null
+                            }
+
+                            val matchesKnownRelease = item.catalogApp.knownApkTagName != null &&
+                                status.release.tagName == item.catalogApp.knownApkTagName
 
                             val resolvedApkVerName = inspectedDetails?.versionName
                                 ?: status.release.apkVersionName
-                                ?: cachedApk?.apkVersionName
-                                ?: item.catalogApp.knownApkVersionName
+                                ?: (if (isSameCachedRelease) cachedApk?.apkVersionName else null)
+                                ?: (if (matchesKnownRelease) item.catalogApp.knownApkVersionName else null)
                             val resolvedApkVerCode = inspectedDetails?.versionCode
                                 ?: status.release.apkVersionCode
-                                ?: cachedApk?.apkVersionCode
-                                ?: item.catalogApp.knownApkVersionCode
+                                ?: (if (isSameCachedRelease) cachedApk?.apkVersionCode else null)
+                                ?: (if (matchesKnownRelease) item.catalogApp.knownApkVersionCode else null)
 
                             val releaseWithApk = status.release.copy(
                                 apkVersionName = resolvedApkVerName,
