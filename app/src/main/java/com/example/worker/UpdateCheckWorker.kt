@@ -5,10 +5,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.core.content.pm.PackageInfoCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -19,10 +17,11 @@ import androidx.work.WorkerParameters
 import com.example.MainActivity
 import com.example.R
 import com.example.catalog.AppCatalog
-import com.example.data.api.GitHubApiClient
-import com.example.data.preferences.PStoreDataStore
+import com.example.data.repository.PStoreRepository
+import com.example.model.AppInstallStatus
+import com.example.model.CheckIntervalHours
+import com.example.model.NetworkPreference
 import com.example.model.ReleaseStatus
-import com.example.util.VersionComparator
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
@@ -36,18 +35,37 @@ class UpdateCheckWorker(
         const val CHANNEL_ID = "p_store_updates_channel"
         const val NOTIFICATION_ID = 1001
 
-        fun schedule(context: Context) {
+        fun schedule(
+            context: Context,
+            interval: CheckIntervalHours = CheckIntervalHours.H12,
+            networkPreference: NetworkPreference = NetworkPreference.WIFI_ONLY,
+            replaceExisting: Boolean = false
+        ) {
+            val networkType = when (networkPreference) {
+                NetworkPreference.WIFI_ONLY -> NetworkType.UNMETERED
+                NetworkPreference.ANY_NETWORK -> NetworkType.CONNECTED
+            }
+
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiredNetworkType(networkType)
                 .build()
 
-            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(12, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(
+                interval.hours,
+                TimeUnit.HOURS
+            )
                 .setConstraints(constraints)
                 .build()
 
+            val policy = if (replaceExisting) {
+                ExistingPeriodicWorkPolicy.UPDATE
+            } else {
+                ExistingPeriodicWorkPolicy.KEEP
+            }
+
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                policy,
                 request
             )
         }
@@ -58,85 +76,31 @@ class UpdateCheckWorker(
     }
 
     override suspend fun doWork(): Result {
-        val dataStore = PStoreDataStore(appContext)
-        val isEnabled = dataStore.backgroundChecksEnabled.first()
-        if (!isEnabled) {
+        val repository = PStoreRepository(appContext)
+        val autoCheckEnabled = repository.autoCheckEnabled.first()
+        if (!autoCheckEnabled) {
             return Result.success()
         }
 
-        val api = GitHubApiClient()
-        val pm = appContext.packageManager
+        val notificationsEnabled = repository.notificationsEnabled.first()
         var updateCount = 0
 
         for (app in AppCatalog.apps) {
-            val savedPackage = if (app.isSelf) {
-                appContext.packageName
-            } else {
-                dataStore.getSavedPackageNameOnce(app.owner, app.repo) ?: app.defaultPackageName
-            }
+            val installedInfo = repository.getInstalledInfo(app.packageName)
+            if (!installedInfo.isInstalled) continue
 
-            var installedVersionName: String? = null
-            var installedVersionCode: Long? = null
-
-            if (savedPackage != null) {
-                try {
-                    val info = pm.getPackageInfo(savedPackage, 0)
-                    installedVersionName = info.versionName
-                    installedVersionCode = PackageInfoCompat.getLongVersionCode(info)
-                } catch (_: PackageManager.NameNotFoundException) {}
-            }
-
-            // If not installed, skip update count
-            if (installedVersionName == null) continue
-
-            when (val result = api.getLatestRelease(app.owner, app.repo)) {
-                is ReleaseStatus.Success -> {
-                    val cachedRelease = dataStore.getCachedRelease(app.owner, app.repo).first()
-                    val isSameCachedRelease = cachedRelease != null &&
-                        cachedRelease.tagName == result.release.tagName &&
-                        cachedRelease.apkDownloadUrl == result.release.apkDownloadUrl
-                    val matchesKnownRelease = app.knownApkTagName != null &&
-                        result.release.tagName == app.knownApkTagName
-
-                    val resolvedApkVerName = result.release.apkVersionName
-                        ?: (if (isSameCachedRelease) cachedRelease?.apkVersionName else null)
-                        ?: (if (matchesKnownRelease) app.knownApkVersionName else null)
-                    val resolvedApkVerCode = result.release.apkVersionCode
-                        ?: (if (isSameCachedRelease) cachedRelease?.apkVersionCode else null)
-                        ?: (if (matchesKnownRelease) app.knownApkVersionCode else null)
-
-                    val releaseWithApk = result.release.copy(
-                        apkVersionName = resolvedApkVerName,
-                        apkVersionCode = resolvedApkVerCode
-                    )
-                    dataStore.saveCachedRelease(app.owner, app.repo, releaseWithApk)
-
-                    val effectiveTargetVersion = resolvedApkVerName ?: releaseWithApk.version
-                    val hasUpdate = if (resolvedApkVerName != null &&
-                        VersionComparator.cleanVersion(installedVersionName)
-                            .equals(VersionComparator.cleanVersion(resolvedApkVerName), ignoreCase = true)
-                    ) {
-                        resolvedApkVerCode != null && installedVersionCode != null &&
-                            resolvedApkVerCode > installedVersionCode
-                    } else {
-                        VersionComparator.isUpdateAvailable(
-                            installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode,
-                            latestVersionName = effectiveTargetVersion,
-                            apkVersionCode = resolvedApkVerCode
-                        )
-                    }
-                    if (hasUpdate) {
-                        updateCount++
-                    }
+            val status = repository.fetchLatestRelease(app)
+            if (status is ReleaseStatus.Success) {
+                val installStatus = repository.computeInstallStatus(installedInfo, status.release)
+                if (installStatus == AppInstallStatus.UPDATE_AVAILABLE) {
+                    updateCount++
                 }
-                else -> { /* Skip errors in background */ }
             }
         }
 
-        dataStore.setLastCheckTime(System.currentTimeMillis())
+        repository.setLastCheckTime(System.currentTimeMillis())
 
-        if (updateCount > 0) {
+        if (updateCount > 0 && notificationsEnabled) {
             showNotification(updateCount)
         }
 
@@ -144,15 +108,16 @@ class UpdateCheckWorker(
     }
 
     private fun showNotification(count: Int) {
-        val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "App Updates",
+                appContext.getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Notifications when updates are available for your apps"
+                description = appContext.getString(R.string.notification_channel_desc)
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -168,12 +133,15 @@ class UpdateCheckWorker(
         }
 
         val pendingIntent = PendingIntent.getActivity(appContext, 0, intent, flags)
-
-        val text = if (count == 1) "1 update available" else "$count updates available"
+        val text = if (count == 1) {
+            appContext.getString(R.string.notification_update_one)
+        } else {
+            appContext.getString(R.string.notification_update_many, count)
+        }
 
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.p_store_icon)
-            .setContentTitle("P Store")
+            .setContentTitle(appContext.getString(R.string.app_name))
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
@@ -183,7 +151,7 @@ class UpdateCheckWorker(
         try {
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (_: SecurityException) {
-            // Notification permission might be revoked
+            // Notification permission revoked by user
         }
     }
 }

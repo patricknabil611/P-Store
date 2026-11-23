@@ -1,65 +1,78 @@
 package com.example.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 
-private val DarkColorScheme = darkColorScheme(
-    primary = ForestGreenPrimaryDark,
-    onPrimary = ForestGreenOnPrimaryDark,
-    primaryContainer = ForestGreenPrimaryContainerDark,
-    onPrimaryContainer = ForestGreenOnPrimaryContainerDark,
-    secondary = ForestGreenSecondaryDark,
-    onSecondary = ForestGreenOnSecondaryDark,
-    secondaryContainer = ForestGreenSecondaryContainerDark,
-    onSecondaryContainer = ForestGreenOnSecondaryContainerDark,
-    background = ForestGreenBackgroundDark,
-    surface = ForestGreenSurfaceDark,
-    surfaceVariant = ForestGreenSurfaceVariantDark,
-    onSurface = ForestGreenOnSurfaceDark,
-    outline = ForestGreenOutlineDark
+private val MidnightMaterialScheme = darkColorScheme(
+    primary = MidnightAccent,
+    onPrimary = MidnightOnAccent,
+    primaryContainer = MidnightSubtleSurface,
+    onPrimaryContainer = MidnightAccent,
+    secondary = MidnightSuccess,
+    onSecondary = MidnightBackground,
+    background = MidnightBackground,
+    onBackground = MidnightPrimaryText,
+    surface = MidnightCard,
+    onSurface = MidnightPrimaryText,
+    surfaceVariant = MidnightSubtleSurface,
+    onSurfaceVariant = MidnightSecondaryText,
+    outline = MidnightCardBorder,
+    outlineVariant = MidnightCardBorder,
+    error = MidnightError,
+    onError = MidnightBackground,
+    errorContainer = MidnightErrorContainer,
+    onErrorContainer = MidnightError
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = ForestGreenPrimaryLight,
-    onPrimary = ForestGreenOnPrimaryLight,
-    primaryContainer = ForestGreenPrimaryContainerLight,
-    onPrimaryContainer = ForestGreenOnPrimaryContainerLight,
-    secondary = ForestGreenSecondaryLight,
-    onSecondary = ForestGreenOnSecondaryLight,
-    secondaryContainer = ForestGreenSecondaryContainerLight,
-    onSecondaryContainer = ForestGreenOnSecondaryContainerLight,
-    background = ForestGreenBackgroundLight,
-    surface = ForestGreenSurfaceLight,
-    surfaceVariant = ForestGreenSurfaceVariantLight,
-    onSurface = ForestGreenOnSurfaceLight,
-    outline = ForestGreenOutlineLight
+private val CleanShelfMaterialScheme = lightColorScheme(
+    primary = ShelfAccent,
+    onPrimary = ShelfOnAccent,
+    primaryContainer = ShelfBannerBg,
+    onPrimaryContainer = ShelfBannerText,
+    secondary = ShelfSuccess,
+    onSecondary = ShelfOnAccent,
+    background = ShelfBackground,
+    onBackground = ShelfPrimaryText,
+    surface = ShelfCard,
+    onSurface = ShelfPrimaryText,
+    surfaceVariant = ShelfSegmentedTrack,
+    onSurfaceVariant = ShelfSecondaryText,
+    outline = ShelfDivider,
+    outlineVariant = ShelfDivider,
+    error = ShelfError,
+    onError = ShelfOnAccent,
+    errorContainer = ShelfErrorContainer,
+    onErrorContainer = ShelfError
 )
+
+val LocalPStoreColors = staticCompositionLocalOf { MidnightDockColors }
+
+object PStoreTheme {
+    val colors: PStoreExtendedColors
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalPStoreColors.current
+}
 
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Keep dark green branding intentional
-    content: @Composable () -> Unit,
+    content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
+    val extendedColors = if (darkTheme) MidnightDockColors else CleanShelfColors
+    val materialScheme = if (darkTheme) MidnightMaterialScheme else CleanShelfMaterialScheme
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalPStoreColors provides extendedColors) {
+        MaterialTheme(
+            colorScheme = materialScheme,
+            typography = PStoreTypography,
+            content = content
+        )
+    }
 }

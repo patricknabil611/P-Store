@@ -1,27 +1,185 @@
 <resources>
     <string name="app_name">P Store</string>
-    <string name="settings_title">Settings</string>
+    <string name="pstore_this_app">P Store (this app)</string>
+
+    <!-- Greetings -->
+    <string name="greeting_morning">Good morning, Patrick</string>
+    <string name="greeting_afternoon">Good afternoon, Patrick</string>
+    <string name="greeting_evening">Good evening, Patrick</string>
+
+    <!-- Navigation & Tabs -->
+    <string name="nav_home">Home</string>
+    <string name="nav_store">Store</string>
+    <string name="nav_settings">Settings</string>
+    <string name="tab_my_apps">My apps</string>
+    <string name="tab_updates_count">Updates (%1$d)</string>
+
+    <!-- Section labels -->
+    <string name="section_launch">LAUNCH</string>
+    <string name="section_updates_ready">UPDATES · %1$d READY</string>
+    <string name="section_updates_none">UPDATES · ALL CURRENT</string>
+    <string name="section_installing">Installing</string>
+    <string name="section_pending_updates">Pending updates</string>
+    <string name="section_recently_updated">Recently updated</string>
+    <string name="section_whats_new">What\'s new</string>
+    <string name="section_whats_new_in">What\'s new in v%1$s</string>
+    <string name="from_github_release">from GitHub release</string>
+
+    <!-- Filters -->
+    <string name="filter_all">All</string>
+    <string name="filter_updates">Updates</string>
+    <string name="filter_not_installed">Not installed</string>
+
+    <!-- Banners & Footers -->
+    <string name="updates_ready_banner_one">1 update ready to install</string>
+    <string name="updates_ready_banner_many">%1$d updates ready to install</string>
     <string name="update_all">Update all</string>
-    <string name="updates_available">%1$d updates available</string>
-    <string name="installed_label">Installed: %1$s</string>
-    <string name="not_installed">Not installed</string>
-    <string name="install_button">Install</string>
-    <string name="update_button">Update</string>
-    <string name="open_button">Open</string>
-    <string name="view_on_github">View on GitHub</string>
-    <string name="no_release_yet">No release yet</string>
-    <string name="repo_not_found">Repo not found or private</string>
-    <string name="rate_limit_reached">GitHub limit reached, try again later</string>
-    <string name="no_internet">No internet connection</string>
-    <string name="installed_success">Installed ✓</string>
-    <string name="signature_conflict_error">This update was signed with a different key. Uninstall the old version, then install again.</string>
-    <string name="different_app_error">This APK belongs to a different app.</string>
-    <string name="detect_apps">Detect my apps</string>
-    <string name="detect_apps_desc">Downloads latest APKs to extract package names, then deletes them</string>
-    <string name="background_checks">Background checks</string>
-    <string name="background_checks_desc">Check for updates every 12 hours over Wi-Fi/cellular</string>
-    <string name="clear_cache">Clear download cache</string>
-    <string name="reset">Reset</string>
-    <string name="permission_install_unknown_title">Permission required</string>
-    <string name="permission_install_unknown_message">P Store needs permission to install downloaded APKs. Please allow installs from this source in Settings.</string>
+    <string name="updating_progress">Updating %1$d of %2$d…</string>
+    <string name="synced_with_github_never">Synced with GitHub · not checked yet</string>
+    <string name="synced_with_github_just_now">Synced with GitHub · checked just now</string>
+    <string name="synced_with_github_mins">Synced with GitHub · checked %1$d min ago</string>
+    <string name="synced_with_github_hours">Synced with GitHub · checked %1$d hr ago</string>
+    <string name="synced_with_github_days">Synced with GitHub · checked %1$d d ago</string>
+    <string name="last_checked_just_now">Last checked just now</string>
+    <string name="last_checked_mins">Last checked %1$d min ago</string>
+    <string name="last_checked_hours">Last checked %1$d hr ago</string>
+    <string name="last_checked_days">Last checked %1$d d ago</string>
+
+    <!-- Status lines -->
+    <string name="status_checking">Checking GitHub…</string>
+    <string name="status_up_to_date">Up to date</string>
+    <string name="status_up_to_date_ver">Up to date · v%1$s</string>
+    <string name="status_ver_up_to_date">v%1$s · Up to date</string>
+    <string name="status_ver_available">v%1$s available</string>
+    <string name="status_update_arrow">v%1$s → v%2$s</string>
+    <string name="status_update_arrow_size">v%1$s → v%2$s · %3$s</string>
+    <string name="status_not_installed">Not installed</string>
+    <string name="status_not_installed_ver">Not installed · v%1$s</string>
+    <string name="status_not_installed_ver_size">Not installed · v%1$s · %2$s</string>
+    <string name="status_installed_latest">Installed v%1$s · Latest v%2$s</string>
+    <string name="status_not_installed_latest">Not installed · Latest v%1$s</string>
+    <string name="status_latest_check_badge">✓ Latest</string>
+    <string name="status_downloading_detail">Downloading · %1$s of %2$s</string>
+    <string name="status_verifying">Verifying APK…</string>
+    <string name="status_installing">Installing…</string>
+    <string name="status_installed_success">Installed ✓</string>
+
+    <!-- Buttons & Actions -->
+    <string name="action_open">Open</string>
+    <string name="action_update">Update</string>
+    <string name="action_update_size">Update · %1$s</string>
+    <string name="action_install">Install</string>
+    <string name="action_install_size">Install · %1$s</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_uninstall">Uninstall</string>
+    <string name="action_copy_app_info">Copy app info</string>
+    <string name="action_copy_all_apps_info">Copy all apps info</string>
+    <string name="action_see_all">See all</string>
+    <string name="action_save">Save</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_close">Close</string>
+    <string name="action_open_settings">Open Settings</string>
+    <string name="action_check_pstore_update">Check for P Store update</string>
+
+    <!-- App Detail Info Rows -->
+    <string name="info_package_name">Package name</string>
+    <string name="info_source">Source</string>
+    <string name="info_auto_update">Auto-update</string>
+    <string name="info_older_versions">Older versions</string>
+    <string name="auto_update_wifi">Wi-Fi only</string>
+    <string name="auto_update_always">Always</string>
+    <string name="auto_update_off">Off</string>
+    <string name="no_release_notes">No release notes provided for this version.</string>
+
+    <!-- Older Versions Dialog -->
+    <string name="older_versions_title">Older versions · %1$s</string>
+    <string name="older_versions_loading">Loading releases from GitHub…</string>
+    <string name="older_versions_empty">No downloadable APK releases found.</string>
+    <string name="older_versions_current">Installed</string>
+    <string name="older_versions_rollback">Install</string>
+
+    <!-- Empty States -->
+    <string name="empty_no_updates_title">Everything is up to date</string>
+    <string name="empty_no_updates_subtitle">All installed apps match their latest GitHub releases.</string>
+    <string name="empty_filter_title">No matching apps</string>
+    <string name="empty_filter_subtitle">Try switching the filter to see all apps in your catalog.</string>
+    <string name="empty_recent_updates">No recent updates recorded yet.</string>
+
+    <!-- Errors -->
+    <string name="error_no_internet">No internet connection</string>
+    <string name="error_rate_limit">GitHub rate limit reached</string>
+    <string name="error_no_release">No releases published yet</string>
+    <string name="error_no_apk">Release has no APK file attached</string>
+    <string name="error_repo_not_found">Repository not found or private</string>
+    <string name="error_wifi_required">Wi-Fi required by Settings. Connect to Wi-Fi or allow any network.</string>
+    <string name="error_invalid_apk">Downloaded APK is invalid or corrupt</string>
+    <string name="error_package_mismatch">APK package does not match this app</string>
+    <string name="error_cannot_open">Could not open this app</string>
+    <string name="error_signature_mismatch">This APK is signed with a different key than the installed app. Uninstall the existing app once, then install it again from P Store.</string>
+    <string name="error_install_cancelled">Installation was cancelled</string>
+    <string name="error_generic_install">Installation failed</string>
+
+    <!-- Unknown Apps Permission Screen / Dialog -->
+    <string name="permission_install_unknown_title">Allow app installs</string>
+    <string name="permission_install_unknown_message">P Store needs permission to install APK updates from GitHub Releases. Enable \"Allow from this source\" in Android Settings and return here to continue automatically.</string>
+
+    <!-- Clipboard & Notifications -->
+    <string name="clipboard_label">P Store app info</string>
+    <string name="copied_single_app">Copied %1$s info</string>
+    <string name="copied_all_apps">Copied info for %1$d apps</string>
+    <string name="notification_channel_name">App Updates</string>
+    <string name="notification_channel_desc">Notifications when updates are available for your apps</string>
+    <string name="notification_update_one">1 update available</string>
+    <string name="notification_update_many">%1$d updates available</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_theme_label">Theme</string>
+    <string name="settings_theme_subtitle">Dark uses Midnight Dock; Light uses Clean Shelf</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+
+    <string name="settings_section_updates">Updates &amp; Network</string>
+    <string name="settings_auto_check">Auto-check for updates</string>
+    <string name="settings_auto_check_desc">Periodically check GitHub Releases in the background</string>
+    <string name="settings_check_interval">Check interval</string>
+    <string name="interval_6h">6h</string>
+    <string name="interval_12h">12h</string>
+    <string name="interval_24h">24h</string>
+    <string name="settings_download_over">Download over</string>
+    <string name="network_wifi_only">Wi-Fi only</string>
+    <string name="network_any">Any network</string>
+    <string name="settings_notifications">Update notifications</string>
+    <string name="settings_notifications_desc">Notify when a newer release is ready</string>
+
+    <string name="settings_section_github">GitHub Access</string>
+    <string name="settings_github_token_title">Personal Access Token (optional)</string>
+    <string name="settings_github_token_desc">Stored encrypted on this device to raise GitHub API rate limits.</string>
+    <string name="settings_github_token_placeholder">ghp_xxxxxxxxxxxxxxxxxxxx</string>
+    <string name="settings_github_token_saved">Encrypted token saved on device</string>
+    <string name="settings_github_token_cleared">GitHub token removed</string>
+
+    <string name="settings_section_tools">Catalog &amp; Storage</string>
+    <string name="settings_copy_all_desc">Copy display name, package name, and GitHub repo for all %1$d apps</string>
+    <string name="settings_cache_title">Download cache</string>
+    <string name="settings_cache_size">Using %1$s</string>
+    <string name="settings_cache_cleared">Cleared %1$s from cache</string>
+
+    <string name="settings_section_about">About P Store</string>
+    <string name="settings_version_line">Version %1$s (build %2$d)</string>
+    <string name="settings_pstore_up_to_date">P Store is up to date</string>
+    <string name="settings_pstore_update_ready">P Store v%1$s is available</string>
+
+    <!-- Content Descriptions -->
+    <string name="cd_refresh">Refresh releases</string>
+    <string name="cd_settings">Open settings</string>
+    <string name="cd_back">Navigate back</string>
+    <string name="cd_cancel_download">Cancel download</string>
+    <string name="cd_copy">Copy to clipboard</string>
+    <string name="cd_app_icon">%1$s icon</string>
+    <string name="cd_updates_icon">Updates available</string>
+    <string name="cd_more_options">App options</string>
 </resources>

@@ -4,10 +4,30 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 sealed interface InstallEvent {
-    data class Success(val packageName: String, val appName: String, val apkPath: String) : InstallEvent
-    data class SignatureConflict(val packageName: String, val appName: String, val apkPath: String) : InstallEvent
-    data class Failure(val packageName: String, val appName: String, val errorMessage: String, val apkPath: String) : InstallEvent
-    data class UserActionRequired(val packageName: String, val appName: String) : InstallEvent
+    data class Success(
+        val packageName: String,
+        val appName: String,
+        val version: String,
+        val apkPath: String
+    ) : InstallEvent
+
+    data class SignatureConflict(
+        val packageName: String,
+        val appName: String,
+        val apkPath: String
+    ) : InstallEvent
+
+    data class Failure(
+        val packageName: String,
+        val appName: String,
+        val errorMessage: String,
+        val apkPath: String
+    ) : InstallEvent
+
+    data class UserActionRequired(
+        val packageName: String,
+        val appName: String
+    ) : InstallEvent
 }
 
 object InstallEvents {

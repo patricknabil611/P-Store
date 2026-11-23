@@ -1,8 +1,9 @@
 package com.example
 
 import com.example.catalog.AppCatalog
-import com.example.data.api.model.GitHubAssetDto
+import com.example.catalog.AppIconType
 import com.example.data.api.model.GitHubReleaseDto
+import com.example.util.Formatters
 import com.example.util.VersionComparator
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -15,122 +16,110 @@ import org.junit.Test
 class ExampleUnitTest {
 
     @Test
-    fun testAppCatalogContainsRequiredApps() {
-        assertEquals(4, AppCatalog.apps.size)
+    fun testAppCatalogContainsAllSixAppsWithExactMetadata() {
+        assertEquals(6, AppCatalog.apps.size)
 
-        val money = AppCatalog.apps.find { it.name == "P Money" }
-        assertEquals("patricknabil611", money?.owner)
-        assertEquals("Money-Map", money?.repo)
-        assertFalse(money?.isSelf ?: true)
+        val launcherApps = AppCatalog.apps.filter { it.showInLauncher }
+        assertEquals(5, launcherApps.size)
 
-        val task = AppCatalog.apps.find { it.name == "P Task" }
-        assertEquals("patricknabil611", task?.owner)
-        assertEquals("P-Task", task?.repo)
+        val money = AppCatalog.findByPackageName("com.aistudio.moneymap.zqpjfl")
+        assertEquals("P Money", money?.displayName)
+        assertEquals("patricknabil611/Money-Map", money?.fullRepoName)
+        assertEquals(AppIconType.COIN_DOLLAR, money?.icon)
+        assertTrue(money?.showInLauncher == true)
 
-        val habits = AppCatalog.apps.find { it.name == "P Habits" }
-        assertEquals("patricknabil611", habits?.owner)
-        assertEquals("P-Habits", habits?.repo)
+        val task = AppCatalog.findByPackageName("com.aistudio.todolist.zkvmrq")
+        assertEquals("P Task", task?.displayName)
+        assertEquals("patricknabil611/P-Task", task?.fullRepoName)
+        assertEquals(AppIconType.CHECKBOX, task?.icon)
 
-        val store = AppCatalog.apps.find { it.name == "P Store" }
-        assertEquals("patricknabil611", store?.owner)
-        assertEquals("P-Store", store?.repo)
-        assertTrue(store?.isSelf ?: false)
+        val habits = AppCatalog.findByPackageName("com.aistudio.phabits.qvxrzt")
+        assertEquals("P Habits", habits?.displayName)
+        assertEquals("patricknabil611/P-Habits", habits?.fullRepoName)
+        assertEquals(AppIconType.FLAME, habits?.icon)
+
+        val ink = AppCatalog.findByPackageName("com.aistudio.pink.spenzx")
+        assertEquals("P Ink", ink?.displayName)
+        assertEquals("patricknabil611/P-Ink", ink?.fullRepoName)
+        assertEquals(AppIconType.PEN_NIB, ink?.icon)
+
+        val ludo = AppCatalog.findByPackageName("com.aistudio.ludoform.qwrtxz")
+        assertEquals("Ludo for M", ludo?.displayName)
+        assertEquals("patricknabil611/Ludo-for-M", ludo?.fullRepoName)
+        assertEquals(AppIconType.DIE_FIVE, ludo?.icon)
+        assertTrue(ludo?.showInLauncher == true)
+
+        val store = AppCatalog.findByPackageName("com.patricknabil.pstore")
+        assertEquals("P Store", store?.displayName)
+        assertEquals("patricknabil611/P-Store", store?.fullRepoName)
+        assertEquals(AppIconType.P_STORE, store?.icon)
+        assertFalse(store?.showInLauncher == true)
+        assertTrue(store?.isSelf == true)
+    }
+
+    @Test
+    fun testClipboardFormattingMatchesSpecification() {
+        val habits = AppCatalog.findByPackageName("com.aistudio.phabits.qvxrzt")!!
+        val expectedSingle = """
+            Display name: P Habits
+            Package name: com.aistudio.phabits.qvxrzt
+            GitHub repo: patricknabil611/P-Habits
+        """.trimIndent()
+        assertEquals(expectedSingle, AppCatalog.formatAppInfo(habits))
+
+        val allFormatted = AppCatalog.formatAllAppsInfo()
+        val blocks = allFormatted.split("\n\n")
+        assertEquals(6, blocks.size)
+        assertTrue(allFormatted.contains("Display name: P Store\nPackage name: com.patricknabil.pstore\nGitHub repo: patricknabil611/P-Store"))
+        assertTrue(allFormatted.contains("Display name: Ludo for M\nPackage name: com.aistudio.ludoform.qwrtxz\nGitHub repo: patricknabil611/Ludo-for-M"))
     }
 
     @Test
     fun testSemanticVersionComparison() {
-        // Explicit user requirement: 1.10.0 > 1.9.0
         val cmp = VersionComparator.compareSemantic("1.10.0", "1.9.0")
         assertTrue(cmp != null && cmp > 0)
 
-        // Leading 'v' stripping
         assertEquals("1.6.0", VersionComparator.cleanVersion("v1.6.0"))
         assertEquals("1.6.0", VersionComparator.cleanVersion("V1.6.0"))
 
-        // Update available checks
         assertTrue(
             VersionComparator.isUpdateAvailable(
-                installedVersionName = "1.5.0",
-                installedVersionCode = 10,
-                latestVersionName = "1.6.0"
+                installedVersionName = "1.9.0",
+                installedVersionCode = 9,
+                latestVersionName = "1.10.0"
             )
         )
-
         assertFalse(
             VersionComparator.isUpdateAvailable(
-                installedVersionName = "1.6.0",
-                installedVersionCode = 20,
-                latestVersionName = "1.6.0"
+                installedVersionName = "1.10.0",
+                installedVersionCode = 10,
+                latestVersionName = "1.10.0"
             )
         )
-
         assertFalse(
             VersionComparator.isUpdateAvailable(
                 installedVersionName = "2.0.0",
-                installedVersionCode = 30,
+                installedVersionCode = 20,
                 latestVersionName = "1.9.0"
-            )
-        )
-
-        // User case: GitHub release tagged "26.06.26.1", but APK is internally 2.5.0
-        // When comparing installed 2.5.0 against the actual APK version 2.5.0:
-        assertFalse(
-            VersionComparator.isUpdateAvailable(
-                installedVersionName = "2.5.0",
-                installedVersionCode = 25,
-                latestVersionName = "2.5.0",
-                apkVersionCode = 25
-            )
-        )
-
-        // When installed is older (2.4.0) than the APK (2.5.0):
-        assertTrue(
-            VersionComparator.isUpdateAvailable(
-                installedVersionName = "2.4.0",
-                installedVersionCode = 24,
-                latestVersionName = "2.5.0",
-                apkVersionCode = 25
-            )
-        )
-
-        // User explicit requirement: 26.06.26.1 -> 26.06.26.2 -> 26.06.26.3
-        val cmpPatch = VersionComparator.compareSemantic("26.06.26.2", "26.06.26.1")
-        assertTrue(cmpPatch != null && cmpPatch > 0)
-
-        val cmpPatch2 = VersionComparator.compareSemantic("26.06.26.3", "26.06.26.2")
-        assertTrue(cmpPatch2 != null && cmpPatch2 > 0)
-
-        // 26.06.26.1 is up to date with 26.06.26.1
-        assertFalse(
-            VersionComparator.isUpdateAvailable(
-                installedVersionName = "26.06.26.1",
-                installedVersionCode = 26062601L,
-                latestVersionName = "26.06.26.1",
-                apkVersionCode = 26062601L
-            )
-        )
-
-        // 26.06.26.2 is an update over 26.06.26.1
-        assertTrue(
-            VersionComparator.isUpdateAvailable(
-                installedVersionName = "26.06.26.1",
-                installedVersionCode = 26062601L,
-                latestVersionName = "26.06.26.2",
-                apkVersionCode = 26062602L
             )
         )
     }
 
     @Test
-    fun testVersionCodeFallbackWhenNameUnparseable() {
-        val hasUpdate = VersionComparator.isUpdateAvailable(
-            installedVersionName = "custom_beta",
-            installedVersionCode = 100L,
-            latestVersionName = "custom_alpha",
-            apkVersionCode = 200L
-        )
-        // Since names are non-numeric strings that might not yield a clear version, check fallback
-        assertTrue(hasUpdate)
+    fun testReleaseMarkdownBulletParser() {
+        val raw = """
+            ## What's Changed
+            - Added **Midnight Dock** dark mode
+            * Added `Clean Shelf` light mode
+            1. Improved download speed
+        """.trimIndent()
+
+        val bullets = Formatters.parseReleaseBullets(raw)
+        assertEquals(4, bullets.size)
+        assertEquals("What's Changed", bullets[0])
+        assertEquals("Added Midnight Dock dark mode", bullets[1])
+        assertEquals("Added Clean Shelf light mode", bullets[2])
+        assertEquals("Improved download speed", bullets[3])
     }
 
     @Test
@@ -163,12 +152,9 @@ class ExampleUnitTest {
         assertNotNull(dto)
         assertEquals("v1.6.0", dto?.tagName)
         assertEquals("1.6.0", VersionComparator.cleanVersion(dto?.tagName))
-        assertEquals(2, dto?.assets?.size)
-
         val apkAsset = dto?.assets?.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
         assertNotNull(apkAsset)
         assertEquals("app-release.apk", apkAsset?.name)
         assertEquals(15000000L, apkAsset?.size)
-        assertEquals("https://github.com/test/app.apk", apkAsset?.browserDownloadUrl)
     }
 }

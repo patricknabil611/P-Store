@@ -15,12 +15,14 @@ class InstallResultReceiver : BroadcastReceiver() {
         const val ACTION_INSTALL_STATUS = "com.example.pstore.ACTION_INSTALL_STATUS"
         const val EXTRA_PACKAGE_NAME = "extra_package_name"
         const val EXTRA_APP_NAME = "extra_app_name"
+        const val EXTRA_TARGET_VERSION = "extra_target_version"
         const val EXTRA_APK_PATH = "extra_apk_path"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         val packageName = intent.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
         val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: packageName
+        val targetVersion = intent.getStringExtra(EXTRA_TARGET_VERSION) ?: ""
         val apkPath = intent.getStringExtra(EXTRA_APK_PATH) ?: ""
 
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
@@ -28,7 +30,6 @@ class InstallResultReceiver : BroadcastReceiver() {
 
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                // The system needs user confirmation to install/update the app
                 val confirmIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
                 } else {
@@ -44,16 +45,13 @@ class InstallResultReceiver : BroadcastReceiver() {
             }
 
             PackageInstaller.STATUS_SUCCESS -> {
-                // Delete the APK file on success as required
                 if (apkPath.isNotEmpty()) {
                     try {
                         val file = File(apkPath)
-                        if (file.exists()) {
-                            file.delete()
-                        }
+                        if (file.exists()) file.delete()
                     } catch (_: Exception) {}
                 }
-                InstallEvents.emit(InstallEvent.Success(packageName, appName, apkPath))
+                InstallEvents.emit(InstallEvent.Success(packageName, appName, targetVersion, apkPath))
             }
 
             PackageInstaller.STATUS_FAILURE_CONFLICT -> {
@@ -61,18 +59,18 @@ class InstallResultReceiver : BroadcastReceiver() {
             }
 
             else -> {
-                val isSignatureMismatch = statusMessage.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE", ignoreCase = true) ||
+                val isSignatureMismatch =
+                    statusMessage.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE", ignoreCase = true) ||
                         statusMessage.contains("signature", ignoreCase = true) ||
                         statusMessage.contains("signatures do not match", ignoreCase = true)
 
                 if (isSignatureMismatch) {
                     InstallEvents.emit(InstallEvent.SignatureConflict(packageName, appName, apkPath))
-                } else if (status != PackageInstaller.STATUS_FAILURE_ABORTED) {
-                    val err = if (statusMessage.isNotBlank()) statusMessage else "Install failed ($status)"
-                    InstallEvents.emit(InstallEvent.Failure(packageName, appName, err, apkPath))
+                } else if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+                    InstallEvents.emit(InstallEvent.Failure(packageName, appName, "Installation was cancelled", apkPath))
                 } else {
-                    // Aborted by user
-                    InstallEvents.emit(InstallEvent.Failure(packageName, appName, "Installation cancelled", apkPath))
+                    val err = if (statusMessage.isNotBlank()) statusMessage else "Installation failed ($status)"
+                    InstallEvents.emit(InstallEvent.Failure(packageName, appName, err, apkPath))
                 }
             }
         }

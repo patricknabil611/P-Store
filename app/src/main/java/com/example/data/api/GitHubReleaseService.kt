@@ -16,122 +16,132 @@ class GitHubReleaseService(
     private val api: GitHubApiService = RetrofitClient.apiService
 ) {
 
-    /**
-     * Fetches the latest release for a given repository and extracts APK details.
-     */
-    suspend fun getLatestRelease(owner: String, repo: String): ReleaseStatus = withContext(Dispatchers.IO) {
+    private fun buildAuthHeader(token: String?): String? {
+        val trimmed = token?.trim()
+        return if (trimmed.isNullOrEmpty()) null else "Bearer $trimmed"
+    }
+
+    suspend fun getLatestRelease(
+        owner: String,
+        repo: String,
+        token: String? = null
+    ): ReleaseStatus = withContext(Dispatchers.IO) {
+        val authHeader = buildAuthHeader(token)
         try {
-            val response = api.getLatestRelease(owner, repo)
+            val response = api.getLatestRelease(owner, repo, authHeader)
             when (response.code()) {
                 200 -> {
                     val dto = response.body()
                     if (dto == null || dto.tagName.isBlank()) {
-                        return@withContext ReleaseStatus.NoRelease("No release yet")
+                        return@withContext ReleaseStatus.NoRelease("No releases published yet")
                     }
-
-                    val apkAsset = dto.assets.firstOrNull { asset ->
-                        asset.name.endsWith(".apk", ignoreCase = true)
-                    }
-
-                    if (apkAsset == null || apkAsset.browserDownloadUrl.isBlank()) {
-                        return@withContext ReleaseStatus.NoRelease("No release yet")
-                    }
-
-                    val version = VersionComparator.cleanVersion(dto.tagName)
-                    val formattedDate = formatPublishedDate(dto.publishedAt ?: "")
-
-                    ReleaseStatus.Success(
-                        ReleaseInfo(
-                            tagName = dto.tagName,
-                            version = version,
-                            apkDownloadUrl = apkAsset.browserDownloadUrl,
-                            apkSize = apkAsset.size,
-                            body = dto.body ?: "",
-                            publishedAt = formattedDate,
-                            rawPublishedAt = dto.publishedAt ?: ""
-                        )
-                    )
+                    mapReleaseDtoToStatus(dto)
                 }
                 404 -> {
-                    // GitHub returns 404 for /releases/latest when no release has been published yet.
-                    // Fall back to querying /releases to distinguish between an accessible repo with no releases vs a missing/private repo.
+                    // /releases/latest returns 404 when only prereleases exist or no releases exist.
                     try {
-                        val allReleasesResponse = api.getReleases(owner, repo, perPage = 5)
-                        when (allReleasesResponse.code()) {
+                        val allResponse = api.getReleases(owner, repo, perPage = 10, authorization = authHeader)
+                        when (allResponse.code()) {
                             200 -> {
-                                val releases = allReleasesResponse.body().orEmpty()
+                                val releases = allResponse.body().orEmpty()
                                 if (releases.isEmpty()) {
                                     ReleaseStatus.NoRelease("No releases published yet")
                                 } else {
-                                    // Check if any release (e.g. pre-release) contains an APK
-                                    val releaseWithApk = releases.firstOrNull { r ->
+                                    val withApk = releases.firstOrNull { r ->
                                         r.assets.any { it.name.endsWith(".apk", ignoreCase = true) }
                                     }
-                                    if (releaseWithApk != null) {
-                                        val apkAsset = releaseWithApk.assets.first { it.name.endsWith(".apk", ignoreCase = true) }
-                                        ReleaseStatus.Success(
-                                            ReleaseInfo(
-                                                tagName = releaseWithApk.tagName,
-                                                version = VersionComparator.cleanVersion(releaseWithApk.tagName),
-                                                apkDownloadUrl = apkAsset.browserDownloadUrl,
-                                                apkSize = apkAsset.size,
-                                                body = releaseWithApk.body ?: "",
-                                                publishedAt = formatPublishedDate(releaseWithApk.publishedAt ?: ""),
-                                                rawPublishedAt = releaseWithApk.publishedAt ?: ""
-                                            )
-                                        )
+                                    if (withApk != null) {
+                                        mapReleaseDtoToStatus(withApk)
                                     } else {
-                                        ReleaseStatus.NoRelease("Release found, but no .apk asset attached")
+                                        ReleaseStatus.NoApkAsset("Release has no APK file attached")
                                     }
                                 }
                             }
-                            404 -> ReleaseStatus.RepoNotFound("Repo not found or private")
-                            403 -> ReleaseStatus.RateLimit("GitHub rate limit reached, try again later")
+                            404 -> ReleaseStatus.RepoNotFound("Repository not found or private")
+                            403, 429 -> ReleaseStatus.RateLimit("GitHub rate limit reached")
                             else -> ReleaseStatus.NoRelease("No releases published yet")
                         }
-                    } catch (e: Exception) {
+                    } catch (_: IOException) {
+                        ReleaseStatus.NoInternet("No internet connection")
+                    } catch (_: Exception) {
                         ReleaseStatus.NoRelease("No releases published yet")
                     }
                 }
-                403 -> ReleaseStatus.RateLimit("GitHub limit reached, try again later")
+                403, 429 -> ReleaseStatus.RateLimit("GitHub rate limit reached")
                 else -> ReleaseStatus.Error("GitHub error (${response.code()})")
             }
-        } catch (e: IOException) {
-            ReleaseStatus.Error("No internet connection")
+        } catch (_: IOException) {
+            ReleaseStatus.NoInternet("No internet connection")
         } catch (e: Exception) {
             ReleaseStatus.Error(e.message ?: "Failed to load release")
         }
     }
 
-    /**
-     * Fetches multiple recent releases for a repository.
-     */
-    suspend fun getReleasesHistory(owner: String, repo: String, limit: Int = 5): Result<List<ReleaseInfo>> = withContext(Dispatchers.IO) {
+    suspend fun getAllReleases(
+        owner: String,
+        repo: String,
+        token: String? = null,
+        limit: Int = 30
+    ): Result<List<ReleaseInfo>> = withContext(Dispatchers.IO) {
+        val authHeader = buildAuthHeader(token)
         try {
-            val response = api.getReleases(owner, repo, limit)
-            if (response.isSuccessful) {
-                val dtoList = response.body().orEmpty()
-                val list = dtoList.mapNotNull { dto ->
-                    val apk = dto.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
-                    if (apk != null) {
-                        ReleaseInfo(
-                            tagName = dto.tagName,
-                            version = VersionComparator.cleanVersion(dto.tagName),
-                            apkDownloadUrl = apk.browserDownloadUrl,
-                            apkSize = apk.size,
-                            body = dto.body ?: "",
-                            publishedAt = formatPublishedDate(dto.publishedAt ?: ""),
-                            rawPublishedAt = dto.publishedAt ?: ""
-                        )
-                    } else null
+            val response = api.getReleases(owner, repo, perPage = limit, authorization = authHeader)
+            when {
+                response.isSuccessful -> {
+                    val list = response.body().orEmpty().mapNotNull { dto ->
+                        val apk = dto.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+                        if (apk != null && apk.browserDownloadUrl.isNotBlank()) {
+                            ReleaseInfo(
+                                tagName = dto.tagName,
+                                version = VersionComparator.cleanVersion(dto.tagName),
+                                apkDownloadUrl = apk.browserDownloadUrl,
+                                apkSize = apk.size,
+                                body = dto.body ?: "",
+                                publishedAt = formatPublishedDate(dto.publishedAt ?: ""),
+                                rawPublishedAt = dto.publishedAt ?: ""
+                            )
+                        } else {
+                            null
+                        }
+                    }
+                    Result.success(list)
                 }
-                Result.success(list)
-            } else {
-                Result.failure(IOException("HTTP error code ${response.code()}"))
+                response.code() == 403 || response.code() == 429 -> {
+                    Result.failure(IOException("GitHub rate limit reached"))
+                }
+                response.code() == 404 -> {
+                    Result.failure(IOException("Repository not found or private"))
+                }
+                else -> {
+                    Result.failure(IOException("GitHub error (${response.code()})"))
+                }
             }
+        } catch (_: IOException) {
+            Result.failure(IOException("No internet connection"))
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun mapReleaseDtoToStatus(dto: GitHubReleaseDto): ReleaseStatus {
+        val apkAsset = dto.assets.firstOrNull { asset ->
+            asset.name.endsWith(".apk", ignoreCase = true)
+        }
+        if (apkAsset == null || apkAsset.browserDownloadUrl.isBlank()) {
+            return ReleaseStatus.NoApkAsset("Release has no APK file attached")
+        }
+        val version = VersionComparator.cleanVersion(dto.tagName)
+        return ReleaseStatus.Success(
+            ReleaseInfo(
+                tagName = dto.tagName,
+                version = version,
+                apkDownloadUrl = apkAsset.browserDownloadUrl,
+                apkSize = apkAsset.size,
+                body = dto.body ?: "",
+                publishedAt = formatPublishedDate(dto.publishedAt ?: ""),
+                rawPublishedAt = dto.publishedAt ?: ""
+            )
+        )
     }
 
     private fun formatPublishedDate(rawDate: String): String {
@@ -140,7 +150,7 @@ class GitHubReleaseService(
             val instant = Instant.parse(rawDate)
             val formatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)
             instant.atZone(ZoneId.systemDefault()).format(formatter)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             rawDate.take(10)
         }
     }

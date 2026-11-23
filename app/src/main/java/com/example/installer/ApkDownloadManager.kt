@@ -18,6 +18,8 @@ class ApkDownloadManager(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 ) {
 
@@ -28,54 +30,54 @@ class ApkDownloadManager(
             if (!exists()) mkdirs()
         }
 
-    fun getApkFile(owner: String, repo: String): File {
-        val safeName = "${owner}_${repo}.apk".replace(Regex("[^a-zA-Z0-9._-]"), "_")
+    fun getApkFile(packageName: String): File {
+        val safeName = "${packageName}.apk".replace(Regex("[^a-zA-Z0-9._-]"), "_")
         return File(apksDir, safeName)
     }
 
-    fun cancelDownload(repoKey: String) {
-        activeCalls.remove(repoKey)?.cancel()
+    fun cancelDownload(packageName: String) {
+        activeCalls.remove(packageName)?.cancel()
     }
 
     suspend fun downloadApk(
-        owner: String,
-        repo: String,
+        packageName: String,
         url: String,
+        expectedSize: Long = 0L,
+        token: String? = null,
         onProgress: (progress: Float, downloadedBytes: Long, totalBytes: Long) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
-        val repoKey = "${owner}/$repo"
-        val destinationFile = getApkFile(owner, repo)
+        val destinationFile = getApkFile(packageName)
 
         if (destinationFile.exists()) {
             destinationFile.delete()
         }
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
             .header("User-Agent", "P-Store-Android-App")
-            .build()
+        if (!token.isNullOrBlank()) {
+            requestBuilder.header("Authorization", "Bearer ${token.trim()}")
+        }
 
-        val call = client.newCall(request)
-        activeCalls[repoKey] = call
+        val call = client.newCall(requestBuilder.build())
+        activeCalls[packageName] = call
 
         try {
             call.execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(IOException("HTTP error code ${response.code}"))
+                    return@withContext Result.failure(IOException("Download failed (HTTP ${response.code})"))
                 }
 
                 val body = response.body ?: return@withContext Result.failure(IOException("Empty response body"))
-                val totalBytes = body.contentLength()
+                val totalBytes = body.contentLength().takeIf { it > 0L } ?: expectedSize
                 var downloadedBytes = 0L
+                var lastEmitTime = 0L
 
-                val inputStream = body.byteStream()
-                val outputStream = FileOutputStream(destinationFile)
-
-                val buffer = ByteArray(8 * 1024)
+                val buffer = ByteArray(16 * 1024)
                 var bytesRead: Int
 
-                inputStream.use { input ->
-                    outputStream.use { output ->
+                body.byteStream().use { input ->
+                    FileOutputStream(destinationFile).use { output ->
                         while (input.read(buffer).also { bytesRead = it } != -1) {
                             if (!coroutineContext.isActive) {
                                 destinationFile.delete()
@@ -84,31 +86,32 @@ class ApkDownloadManager(
                             output.write(buffer, 0, bytesRead)
                             downloadedBytes += bytesRead
 
-                            val progress = if (totalBytes > 0) {
-                                (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
-                            } else {
-                                0f
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmitTime >= 80L || (totalBytes > 0L && downloadedBytes >= totalBytes)) {
+                                lastEmitTime = now
+                                val progress = if (totalBytes > 0L) {
+                                    (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    0f
+                                }
+                                onProgress(progress, downloadedBytes, totalBytes)
                             }
-                            onProgress(progress, downloadedBytes, totalBytes)
                         }
                         output.flush()
                     }
                 }
 
+                onProgress(1f, downloadedBytes, if (totalBytes > 0L) totalBytes else downloadedBytes)
                 Result.success(destinationFile)
             }
         } catch (e: Exception) {
             destinationFile.delete()
             Result.failure(e)
         } finally {
-            activeCalls.remove(repoKey)
+            activeCalls.remove(packageName)
         }
     }
 
-    /**
-     * Clears all downloaded APK files from cache directory.
-     * Returns total bytes freed.
-     */
     fun clearCache(): Long {
         var bytesFreed = 0L
         try {
