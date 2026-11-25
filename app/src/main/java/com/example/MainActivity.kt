@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -31,6 +32,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.ThemeMode
+import com.example.ui.components.AddAppDialog
+import com.example.ui.components.HideAppConfirmDialog
 import com.example.ui.components.UnknownAppsPermissionDialog
 import com.example.ui.dark.MidnightDockShell
 import com.example.ui.dark.MidnightHomeScreen
@@ -43,15 +46,26 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.UiMessage
+import com.example.worker.UpdateCheckWorker
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
 
+    private val _pendingOpenAppKey = MutableStateFlow<String?>(null)
+    private val pendingOpenAppKey: StateFlow<String?> = _pendingOpenAppKey.asStateFlow()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        extractNotificationDeepLink(intent)
         enableEdgeToEdge()
         setContent {
+            val deepLinkKey by pendingOpenAppKey.collectAsStateWithLifecycle()
             PStoreRoot(
+                deepLinkAppKey = deepLinkKey,
+                onConsumeDeepLink = { _pendingOpenAppKey.value = null },
                 onUpdateSystemBars = { isDark ->
                     enableEdgeToEdge(
                         statusBarStyle = if (isDark) {
@@ -75,10 +89,26 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractNotificationDeepLink(intent)
+    }
+
+    private fun extractNotificationDeepLink(intent: Intent?) {
+        val key = intent?.getStringExtra(UpdateCheckWorker.EXTRA_OPEN_APP_KEY)
+        if (!key.isNullOrBlank()) {
+            _pendingOpenAppKey.value = key.lowercase()
+            intent.removeExtra(UpdateCheckWorker.EXTRA_OPEN_APP_KEY)
+        }
+    }
 }
 
 @Composable
 fun PStoreRoot(
+    deepLinkAppKey: String? = null,
+    onConsumeDeepLink: () -> Unit = {},
     onUpdateSystemBars: (Boolean) -> Unit,
     viewModel: MainViewModel = viewModel()
 ) {
@@ -86,6 +116,8 @@ fun PStoreRoot(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val apps by viewModel.apps.collectAsStateWithLifecycle()
+    val hiddenApps by viewModel.hiddenApps.collectAsStateWithLifecycle()
+    val rateLimitNotice by viewModel.rateLimitNotice.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val recentUpdates by viewModel.recentUpdates.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
@@ -144,11 +176,28 @@ fun PStoreRoot(
         }
     }
 
-    // Navigation state shared across theme switches
-    var selectedDetailPackage by rememberSaveable { mutableStateOf<String?>(null) }
+    // Navigation state shared across theme switches (keyed by stable app id / repoKey)
+    var selectedDetailAppId by rememberSaveable { mutableStateOf<String?>(null) }
     var midnightTab by rememberSaveable { mutableStateOf(MidnightTab.HOME) }
     var shelfTab by rememberSaveable { mutableStateOf(ShelfTab.MY_APPS) }
     var shelfSettingsOpen by rememberSaveable { mutableStateOf(false) }
+    var showAddAppDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingHideAppId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Open target app detail page when launched from a "New app available" notification
+    LaunchedEffect(deepLinkAppKey, apps) {
+        if (!deepLinkAppKey.isNullOrBlank()) {
+            val target = apps.firstOrNull {
+                it.id.equals(deepLinkAppKey, ignoreCase = true) ||
+                    (it.packageName.isNotBlank() && it.packageName.equals(deepLinkAppKey, ignoreCase = true))
+            }
+            if (target != null) {
+                selectedDetailAppId = target.id
+                shelfSettingsOpen = false
+                onConsumeDeepLink()
+            }
+        }
+    }
 
     val selfAppState = remember(apps) { apps.firstOrNull { it.catalogApp.isSelf } }
     val updateCount = remember(apps) { apps.count { it.updateAvailable && it.latestRelease != null } }
@@ -162,8 +211,33 @@ fun PStoreRoot(
                 )
             }
 
-            val detailItem = selectedDetailPackage?.let { pkg ->
-                apps.firstOrNull { it.packageName == pkg }
+            if (showAddAppDialog) {
+                AddAppDialog(
+                    onAddApp = { name, pkg, repo, color, icon ->
+                        viewModel.addApp(name, pkg, repo, color, icon)
+                    },
+                    onDismiss = { showAddAppDialog = false }
+                )
+            }
+
+            val pendingHideItem = pendingHideAppId?.let { id ->
+                apps.firstOrNull { it.id == id }
+            }
+            if (pendingHideItem != null) {
+                HideAppConfirmDialog(
+                    item = pendingHideItem,
+                    onConfirmHide = {
+                        if (selectedDetailAppId == pendingHideItem.id) {
+                            selectedDetailAppId = null
+                        }
+                        viewModel.hideApp(pendingHideItem)
+                    },
+                    onDismiss = { pendingHideAppId = null }
+                )
+            }
+
+            val detailItem = selectedDetailAppId?.let { id ->
+                apps.firstOrNull { it.id == id }
             }
 
             when {
@@ -171,18 +245,19 @@ fun PStoreRoot(
                     AppDetailScreen(
                         item = detailItem,
                         snackbarHostState = snackbarHostState,
-                        onNavigateBack = { selectedDetailPackage = null },
+                        onNavigateBack = { selectedDetailAppId = null },
                         onInstallOrUpdate = { specificRelease ->
                             viewModel.onInstallOrUpdateClicked(detailItem, specificRelease)
                         },
                         onCancelDownload = { viewModel.cancelDownload(detailItem) },
                         onOpenApp = { viewModel.openApp(detailItem) },
                         onUninstallApp = { viewModel.uninstallApp(detailItem) },
-                        onRetryRelease = { viewModel.refreshSingleApp(detailItem.packageName) },
+                        onRetryRelease = { viewModel.refreshSingleApp(detailItem.id) },
                         onOpenGitHub = { viewModel.openGitHubReleases(detailItem) },
                         onCycleAutoUpdate = { viewModel.cyclePerAppAutoUpdate(detailItem) },
                         onLoadOlderReleases = { viewModel.loadOlderReleases(detailItem) },
-                        onCopyAppInfo = { viewModel.copyAppInfo(detailItem.catalogApp) }
+                        onCopyAppInfo = { viewModel.copyAppInfo(detailItem.catalogApp) },
+                        onHideApp = { pendingHideAppId = detailItem.id }
                     )
                 }
 
@@ -203,14 +278,17 @@ fun PStoreRoot(
                                     updatingCurrent = updatingCurrent,
                                     updatingTotal = updatingTotal,
                                     lastCheckedAtMillis = settings.lastCheckedAtMillis,
+                                    rateLimitNotice = rateLimitNotice,
                                     onRefresh = { viewModel.refreshReleases() },
+                                    onAddApp = { showAddAppDialog = true },
                                     onOpenApp = { viewModel.openApp(it) },
                                     onInstallOrUpdate = { viewModel.onInstallOrUpdateClicked(it) },
                                     onCancelDownload = { viewModel.cancelDownload(it) },
                                     onUpdateAll = { viewModel.updateAllApps() },
-                                    onOpenDetail = { selectedDetailPackage = it.packageName },
+                                    onOpenDetail = { selectedDetailAppId = it.id },
                                     onCopyAppInfo = { viewModel.copyAppInfo(it.catalogApp) },
-                                    onRetryApp = { viewModel.refreshSingleApp(it.packageName) },
+                                    onHideApp = { pendingHideAppId = it.id },
+                                    onRetryApp = { viewModel.refreshSingleApp(it.id) },
                                     onUninstallApp = { viewModel.uninstallApp(it) }
                                 )
                             }
@@ -221,14 +299,17 @@ fun PStoreRoot(
                                     selectedFilter = storeFilter,
                                     isRefreshing = isRefreshing,
                                     lastCheckedAtMillis = settings.lastCheckedAtMillis,
+                                    rateLimitNotice = rateLimitNotice,
                                     onSelectFilter = { viewModel.setStoreFilter(it) },
                                     onRefresh = { viewModel.refreshReleases() },
-                                    onOpenDetail = { selectedDetailPackage = it.packageName },
+                                    onAddApp = { showAddAppDialog = true },
+                                    onOpenDetail = { selectedDetailAppId = it.id },
                                     onOpenApp = { viewModel.openApp(it) },
                                     onInstallOrUpdate = { viewModel.onInstallOrUpdateClicked(it) },
                                     onCancelDownload = { viewModel.cancelDownload(it) },
                                     onCopyAppInfo = { viewModel.copyAppInfo(it.catalogApp) },
-                                    onRetryApp = { viewModel.refreshSingleApp(it.packageName) },
+                                    onHideApp = { pendingHideAppId = it.id },
+                                    onRetryApp = { viewModel.refreshSingleApp(it.id) },
                                     onUninstallApp = { viewModel.uninstallApp(it) }
                                 )
                             }
@@ -237,6 +318,8 @@ fun PStoreRoot(
                                 SettingsScreen(
                                     settings = settings,
                                     selfAppState = selfAppState,
+                                    hiddenApps = hiddenApps,
+                                    totalAppsCount = apps.size,
                                     snackbarHostState = null,
                                     showBackButton = false,
                                     onNavigateBack = { midnightTab = MidnightTab.HOME },
@@ -247,6 +330,7 @@ fun PStoreRoot(
                                     onToggleNotifications = { viewModel.setNotificationsEnabled(it) },
                                     onSaveGitHubToken = { viewModel.saveGitHubToken(it) },
                                     onClearGitHubToken = { viewModel.clearGitHubToken() },
+                                    onUnhideApp = { viewModel.unhideApp(it) },
                                     onCopyAllAppsInfo = { viewModel.copyAllAppsInfo() },
                                     onClearCache = { viewModel.clearDownloadCache() },
                                     onCheckPStoreUpdate = { viewModel.checkForPStoreUpdate() },
@@ -263,6 +347,8 @@ fun PStoreRoot(
                     SettingsScreen(
                         settings = settings,
                         selfAppState = selfAppState,
+                        hiddenApps = hiddenApps,
+                        totalAppsCount = apps.size,
                         snackbarHostState = snackbarHostState,
                         showBackButton = true,
                         onNavigateBack = { shelfSettingsOpen = false },
@@ -273,6 +359,7 @@ fun PStoreRoot(
                         onToggleNotifications = { viewModel.setNotificationsEnabled(it) },
                         onSaveGitHubToken = { viewModel.saveGitHubToken(it) },
                         onClearGitHubToken = { viewModel.clearGitHubToken() },
+                        onUnhideApp = { viewModel.unhideApp(it) },
                         onCopyAllAppsInfo = { viewModel.copyAllAppsInfo() },
                         onClearCache = { viewModel.clearDownloadCache() },
                         onCheckPStoreUpdate = { viewModel.checkForPStoreUpdate() },
@@ -290,17 +377,20 @@ fun PStoreRoot(
                         updatingCurrent = updatingCurrent,
                         updatingTotal = updatingTotal,
                         lastCheckedAtMillis = settings.lastCheckedAtMillis,
+                        rateLimitNotice = rateLimitNotice,
                         snackbarHostState = snackbarHostState,
                         onSelectTab = { shelfTab = it },
                         onRefresh = { viewModel.refreshReleases() },
+                        onAddApp = { showAddAppDialog = true },
                         onOpenSettings = { shelfSettingsOpen = true },
                         onOpenApp = { viewModel.openApp(it) },
                         onInstallOrUpdate = { viewModel.onInstallOrUpdateClicked(it) },
                         onCancelDownload = { viewModel.cancelDownload(it) },
                         onUpdateAll = { viewModel.updateAllApps() },
-                        onOpenDetail = { selectedDetailPackage = it.packageName },
+                        onOpenDetail = { selectedDetailAppId = it.id },
                         onCopyAppInfo = { viewModel.copyAppInfo(it.catalogApp) },
-                        onRetryApp = { viewModel.refreshSingleApp(it.packageName) },
+                        onHideApp = { pendingHideAppId = it.id },
+                        onRetryApp = { viewModel.refreshSingleApp(it.id) },
                         onUninstallApp = { viewModel.uninstallApp(it) }
                     )
                 }

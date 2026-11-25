@@ -47,6 +47,9 @@
 
     <!-- Status lines -->
     <string name="status_checking">Checking GitHub…</string>
+    <string name="status_checking_update">Checking for update…</string>
+    <string name="status_already_up_to_date">Already up to date</string>
+    <string name="status_already_up_to_date_ver">Already up to date (v%1$s)</string>
     <string name="status_up_to_date">Up to date</string>
     <string name="status_up_to_date_ver">Up to date · v%1$s</string>
     <string name="status_ver_up_to_date">v%1$s · Up to date</string>
@@ -100,15 +103,19 @@
     <string name="older_versions_rollback">Install</string>
 
     <!-- Empty States -->
+    <string name="empty_catalog_message">No apps found. Publish a GitHub release with an APK file and it will appear here.</string>
     <string name="empty_no_updates_title">Everything is up to date</string>
     <string name="empty_no_updates_subtitle">All installed apps match their latest GitHub releases.</string>
     <string name="empty_filter_title">No matching apps</string>
     <string name="empty_filter_subtitle">Try switching the filter to see all apps in your catalog.</string>
     <string name="empty_recent_updates">No recent updates recorded yet.</string>
+    <string name="badge_new">NEW</string>
 
     <!-- Errors -->
     <string name="error_no_internet">No internet connection</string>
     <string name="error_rate_limit">GitHub rate limit reached</string>
+    <string name="error_rate_limit_reset">GitHub rate limit reached. Showing cached apps · resets at %1$s</string>
+    <string name="error_rate_limit_cached">GitHub rate limit reached. Showing cached apps.</string>
     <string name="error_no_release">No releases published yet</string>
     <string name="error_no_apk">Release has no APK file attached</string>
     <string name="error_repo_not_found">Repository not found or private</string>
@@ -129,9 +136,10 @@
     <string name="copied_single_app">Copied %1$s info</string>
     <string name="copied_all_apps">Copied info for %1$d apps</string>
     <string name="notification_channel_name">App Updates</string>
-    <string name="notification_channel_desc">Notifications when updates are available for your apps</string>
+    <string name="notification_channel_desc">Notifications when updates or new apps are available</string>
     <string name="notification_update_one">1 update available</string>
     <string name="notification_update_many">%1$d updates available</string>
+    <string name="notification_new_app">New app available: %1$s</string>
 
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
@@ -173,8 +181,43 @@
     <string name="settings_pstore_up_to_date">P Store is up to date</string>
     <string name="settings_pstore_update_ready">P Store v%1$s is available</string>
 
+    <!-- Add / Hide / Unhide App -->
+    <string name="add_app_title">Add app</string>
+    <string name="add_app_display_name">App name</string>
+    <string name="add_app_display_name_hint">e.g. P Notes</string>
+    <string name="add_app_package_name">Package name</string>
+    <string name="add_app_package_name_hint">e.g. com.example.pnotes</string>
+    <string name="add_app_github_repo">GitHub repository</string>
+    <string name="add_app_github_repo_hint">owner/repo or GitHub URL</string>
+    <string name="add_app_color_label">Accent color</string>
+    <string name="add_app_icon_label">Icon</string>
+    <string name="action_add_app">Add app</string>
+    <string name="action_hide_from_pstore">Hide from P Store</string>
+    <string name="action_hide">Hide</string>
+    <string name="action_unhide">Unhide</string>
+    <string name="action_remove_from_pstore">Remove from P Store</string>
+    <string name="action_remove">Remove</string>
+    <string name="hide_app_title">Hide %1$s?</string>
+    <string name="hide_app_message">This hides %1$s from P Store. You can unhide it anytime in Settings under Hidden apps.</string>
+    <string name="remove_app_title">Remove %1$s?</string>
+    <string name="remove_app_message">This removes %1$s from P Store. It will not uninstall the app from your device.</string>
+    <string name="app_added_snackbar">Added %1$s to P Store</string>
+    <string name="app_hidden_snackbar">Hidden %1$s from P Store</string>
+    <string name="app_unhidden_snackbar">Restored %1$s to P Store</string>
+    <string name="app_removed_snackbar">Removed %1$s from P Store</string>
+    <string name="settings_section_hidden_apps">Hidden apps</string>
+    <string name="settings_hidden_apps_empty">No hidden apps</string>
+    <string name="error_add_app_name_empty">Enter an app name.</string>
+    <string name="error_add_app_package_invalid">Enter a valid Android package name (e.g. com.example.app).</string>
+    <string name="error_add_app_repo_invalid">Enter a valid GitHub repo (owner/repo or GitHub URL).</string>
+    <string name="error_add_app_duplicate">An app with this package name or repo is already in P Store.</string>
+    <string name="info_package_pending">Detected on install</string>
+
     <!-- Content Descriptions -->
     <string name="cd_refresh">Refresh releases</string>
+    <string name="cd_add_app">Add app</string>
+    <string name="cd_hide_app">Hide app from P Store</string>
+    <string name="cd_remove_app">Remove app from P Store</string>
     <string name="cd_settings">Open settings</string>
     <string name="cd_back">Navigate back</string>
     <string name="cd_cancel_download">Cancel download</string>

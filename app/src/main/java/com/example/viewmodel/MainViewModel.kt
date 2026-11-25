@@ -11,6 +11,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.catalog.AppCatalog
+import com.example.catalog.AppIconType
+import com.example.catalog.BrandColorPreset
 import com.example.catalog.CatalogApp
 import com.example.data.repository.PStoreRepository
 import com.example.installer.InstallEvent
@@ -20,6 +22,7 @@ import com.example.model.AppInstallStatus
 import com.example.model.AppItemUiState
 import com.example.model.AutoUpdateMode
 import com.example.model.CheckIntervalHours
+import com.example.model.HiddenAppInfo
 import com.example.model.NetworkPreference
 import com.example.model.OlderReleasesState
 import com.example.model.RecentUpdateRecord
@@ -29,10 +32,9 @@ import com.example.model.SettingsUiState
 import com.example.model.StoreFilter
 import com.example.model.ThemeMode
 import com.example.util.Formatters
+import com.example.util.VersionComparator
 import com.example.worker.UpdateCheckWorker
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,17 +53,27 @@ sealed interface UiMessage {
 }
 
 data class PendingInstallRequest(
-    val packageName: String,
-    val specificRelease: ReleaseInfo? = null
+    val appId: String,
+    val verifiedRelease: ReleaseInfo? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val CATALOG_REFRESH_STALE_MS = 15L * 60L * 1000L
+    }
 
     private val context: Context get() = getApplication()
     private val repository = PStoreRepository(context)
 
     private val _apps = MutableStateFlow<List<AppItemUiState>>(emptyList())
     val apps: StateFlow<List<AppItemUiState>> = _apps.asStateFlow()
+
+    private val _hiddenApps = MutableStateFlow<List<HiddenAppInfo>>(emptyList())
+    val hiddenApps: StateFlow<List<HiddenAppInfo>> = _hiddenApps.asStateFlow()
+
+    private val _rateLimitNotice = MutableStateFlow<String?>(null)
+    val rateLimitNotice: StateFlow<String?> = _rateLimitNotice.asStateFlow()
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -125,11 +137,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val activeDownloadJobs = mutableMapOf<String, Job>()
 
     init {
-        _apps.value = AppCatalog.apps.map { AppItemUiState(catalogApp = it) }
         observeInstallEvents()
         viewModelScope.launch {
             loadLocalState()
-            refreshReleases(isInitial = true)
+            val lastRefresh = repository.dataStore.getLastCatalogRefreshTimeOnce()
+            val hasCachedLauncherApps = _apps.value.any { it.catalogApp.showInLauncher }
+            val isStale = lastRefresh == 0L || (System.currentTimeMillis() - lastRefresh) > CATALOG_REFRESH_STALE_MS
+            if (isStale || !hasCachedLauncherApps) {
+                refreshReleases(isInitial = true)
+            }
         }
     }
 
@@ -138,26 +154,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             InstallEvents.events.collect { event ->
                 when (event) {
                     is InstallEvent.Success -> {
-                        val app = AppCatalog.findByPackageName(event.packageName)
+                        val matchingItem = _apps.value.firstOrNull { it.packageName == event.packageName }
+                        val targetId = matchingItem?.id ?: event.packageName
+                        val app = matchingItem?.catalogApp
+                            ?: if (event.packageName == AppCatalog.SELF_PACKAGE_NAME) AppCatalog.selfApp else null
+                        if (event.version.isNotBlank()) {
+                            repository.saveInstalledTag(event.packageName, event.version)
+                        }
                         if (app != null && event.version.isNotBlank()) {
                             repository.recordSuccessfulUpdate(app, event.version)
                         }
-                        updateActionState(event.packageName, AppActionState.InstalledSuccess(event.version))
+                        updateActionStateByIdOrPackage(targetId, event.packageName, AppActionState.InstalledSuccess(event.version))
                         updateCacheSizeState()
-                        refreshInstalledStatus()
+                        refreshInstalledStatusNow()
                         _uiMessages.tryEmit(
                             UiMessage.Snackbar("${event.appName}: ${context.getString(R.string.status_installed_success)}")
                         )
                         delay(2_200)
-                        updateActionState(event.packageName, AppActionState.Idle)
+                        updateActionStateByIdOrPackage(targetId, event.packageName, AppActionState.Idle)
                     }
                     is InstallEvent.SignatureConflict -> {
+                        val matchingItem = _apps.value.firstOrNull { it.packageName == event.packageName }
+                        val targetId = matchingItem?.id ?: event.packageName
                         val msg = context.getString(R.string.error_signature_mismatch)
-                        updateActionState(event.packageName, AppActionState.SignatureMismatch(msg))
+                        updateActionStateByIdOrPackage(targetId, event.packageName, AppActionState.SignatureMismatch(msg))
                         _uiMessages.tryEmit(UiMessage.Snackbar(msg))
                     }
                     is InstallEvent.Failure -> {
-                        updateActionState(event.packageName, AppActionState.Error(event.errorMessage))
+                        val matchingItem = _apps.value.firstOrNull { it.packageName == event.packageName }
+                        val targetId = matchingItem?.id ?: event.packageName
+                        updateActionStateByIdOrPackage(targetId, event.packageName, AppActionState.Error(event.errorMessage))
                         _uiMessages.tryEmit(UiMessage.Snackbar("${event.appName}: ${event.errorMessage}"))
                     }
                     is InstallEvent.UserActionRequired -> {
@@ -169,16 +195,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadLocalState() {
-        val loaded = AppCatalog.apps.map { app ->
-            val installedInfo = repository.getInstalledInfo(app.packageName)
+        val catalogApps = repository.getCatalogApps()
+        val loaded = catalogApps.map { app ->
+            val installedInfo = repository.getInstalledInfoWithTag(app.packageName)
             val cachedRelease = repository.getCachedRelease(app)
-            val autoUpdateMode = repository.getAutoUpdateMode(app.packageName)
+            val autoUpdateMode = repository.getAutoUpdateMode(app.repoKey)
             val installStatus = repository.computeInstallStatus(installedInfo, cachedRelease)
 
             AppItemUiState(
                 catalogApp = app,
                 installedVersionName = installedInfo.versionName,
                 installedVersionCode = installedInfo.versionCode,
+                installedReleaseTag = installedInfo.installedReleaseTag,
                 isInstalled = installedInfo.isInstalled,
                 installStatus = installStatus,
                 latestRelease = cachedRelease,
@@ -187,102 +215,108 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         _apps.value = loaded
+        _hiddenApps.value = repository.getHiddenApps()
     }
 
     fun refreshInstalledStatus() {
-        _apps.update { currentList ->
-            currentList.map { item ->
-                val installedInfo = repository.getInstalledInfo(item.packageName)
-                val installStatus = repository.computeInstallStatus(installedInfo, item.latestRelease)
-                item.copy(
-                    installedVersionName = installedInfo.versionName,
-                    installedVersionCode = installedInfo.versionCode,
-                    isInstalled = installedInfo.isInstalled,
-                    installStatus = installStatus
-                )
-            }
+        viewModelScope.launch {
+            refreshInstalledStatusNow()
         }
+    }
+
+    private suspend fun refreshInstalledStatusNow() {
+        val currentList = _apps.value
+        val updated = currentList.map { item ->
+            val installedInfo = repository.getInstalledInfoWithTag(item.packageName)
+            val installStatus = repository.computeInstallStatus(installedInfo, item.latestRelease)
+            item.copy(
+                installedVersionName = installedInfo.versionName,
+                installedVersionCode = installedInfo.versionCode,
+                installedReleaseTag = installedInfo.installedReleaseTag,
+                isInstalled = installedInfo.isInstalled,
+                installStatus = installStatus
+            )
+        }
+        _apps.value = updated
     }
 
     fun refreshReleases(isInitial: Boolean = false) {
+        if (_isRefreshing.value) return
         viewModelScope.launch {
-            if (!isInitial) _isRefreshing.value = true
+            _isRefreshing.value = true
+            try {
+                val previousById = _apps.value.associateBy { it.id }
+                val discovery = repository.discoverAppsFromGitHub()
 
-            val results = _apps.value.map { item ->
-                async {
-                    val status = repository.fetchLatestRelease(item.catalogApp)
-                    item.packageName to status
-                }
-            }.awaitAll().toMap()
-
-            var anySuccess = false
-            var allOffline = results.isNotEmpty()
-
-            _apps.update { currentList ->
-                currentList.map { item ->
-                    val status = results[item.packageName] ?: item.releaseStatus
-                    if (status is ReleaseStatus.Success) anySuccess = true
-                    if (status !is ReleaseStatus.NoInternet) allOffline = false
-
-                    val installedInfo = repository.getInstalledInfo(item.packageName)
-                    when (status) {
-                        is ReleaseStatus.Success -> {
-                            val installStatus = repository.computeInstallStatus(installedInfo, status.release)
-                            item.copy(
-                                installedVersionName = installedInfo.versionName,
-                                installedVersionCode = installedInfo.versionCode,
-                                isInstalled = installedInfo.isInstalled,
-                                installStatus = installStatus,
-                                latestRelease = status.release,
-                                releaseStatus = status
-                            )
-                        }
-                        is ReleaseStatus.NoInternet -> {
-                            // Keep cached release visible offline while preserving status if none cached
-                            if (item.latestRelease != null) {
-                                item.copy(
-                                    installedVersionName = installedInfo.versionName,
-                                    installedVersionCode = installedInfo.versionCode,
-                                    isInstalled = installedInfo.isInstalled,
-                                    installStatus = repository.computeInstallStatus(installedInfo, item.latestRelease)
-                                )
-                            } else {
-                                item.copy(
-                                    installedVersionName = installedInfo.versionName,
-                                    installedVersionCode = installedInfo.versionCode,
-                                    isInstalled = installedInfo.isInstalled,
-                                    releaseStatus = status
-                                )
-                            }
-                        }
-                        else -> {
-                            item.copy(
-                                installedVersionName = installedInfo.versionName,
-                                installedVersionCode = installedInfo.versionCode,
-                                isInstalled = installedInfo.isInstalled,
-                                releaseStatus = status
-                            )
-                        }
+                val updatedItems = discovery.visibleApps.map { app ->
+                    val existing = previousById[app.repoKey]
+                    val installedInfo = repository.getInstalledInfoWithTag(app.packageName)
+                    val release = discovery.releasesByRepoKey[app.repoKey]
+                        ?: existing?.latestRelease
+                        ?: repository.getCachedRelease(app)
+                    val autoUpdateMode = existing?.autoUpdateMode
+                        ?: repository.getAutoUpdateMode(app.repoKey)
+                    val installStatus = repository.computeInstallStatus(installedInfo, release)
+                    val releaseStatus = when {
+                        release != null -> ReleaseStatus.Success(release)
+                        discovery.isOffline -> ReleaseStatus.NoInternet(context.getString(R.string.error_no_internet))
+                        discovery.rateLimitResetEpochSeconds != null -> ReleaseStatus.RateLimit(
+                            message = formatRateLimitMessage(discovery.rateLimitResetEpochSeconds),
+                            resetEpochSeconds = discovery.rateLimitResetEpochSeconds
+                        )
+                        else -> ReleaseStatus.NoRelease(context.getString(R.string.error_no_release))
                     }
+
+                    AppItemUiState(
+                        catalogApp = app,
+                        installedVersionName = installedInfo.versionName,
+                        installedVersionCode = installedInfo.versionCode,
+                        installedReleaseTag = installedInfo.installedReleaseTag,
+                        isInstalled = installedInfo.isInstalled,
+                        installStatus = installStatus,
+                        latestRelease = release,
+                        releaseStatus = releaseStatus,
+                        actionState = existing?.actionState ?: AppActionState.Idle,
+                        autoUpdateMode = autoUpdateMode,
+                        olderReleasesState = existing?.olderReleasesState ?: OlderReleasesState.Idle
+                    )
                 }
-            }
 
-            if (anySuccess) {
-                repository.setLastCheckTime(System.currentTimeMillis())
-            } else if (allOffline && !isInitial) {
-                _uiMessages.tryEmit(UiMessage.Snackbar(context.getString(R.string.error_no_internet)))
-            }
+                _apps.value = updatedItems
+                _hiddenApps.value = repository.getHiddenApps()
 
-            _isRefreshing.value = false
+                if (discovery.rateLimitResetEpochSeconds != null) {
+                    val notice = formatRateLimitMessage(discovery.rateLimitResetEpochSeconds)
+                    _rateLimitNotice.value = notice
+                    if (!isInitial) {
+                        _uiMessages.tryEmit(UiMessage.Snackbar(notice))
+                    }
+                } else if (discovery.anySuccess) {
+                    _rateLimitNotice.value = null
+                } else if (discovery.isOffline && !isInitial) {
+                    _uiMessages.tryEmit(UiMessage.Snackbar(context.getString(R.string.error_no_internet)))
+                }
+            } finally {
+                _isRefreshing.value = false
+            }
         }
     }
 
-    fun refreshSingleApp(packageName: String) {
-        val target = _apps.value.firstOrNull { it.packageName == packageName } ?: return
+    private fun formatRateLimitMessage(resetEpochSeconds: Long?): String {
+        val resetTime = resetEpochSeconds?.let { Formatters.formatResetTime(it) }.orEmpty()
+        return if (resetTime.isNotBlank()) {
+            context.getString(R.string.error_rate_limit_reset, resetTime)
+        } else {
+            context.getString(R.string.error_rate_limit_cached)
+        }
+    }
+
+    fun refreshSingleApp(appId: String) {
+        val target = _apps.value.firstOrNull { it.id == appId || it.packageName == appId } ?: return
         viewModelScope.launch {
             _apps.update { list ->
                 list.map {
-                    if (it.packageName == packageName) {
+                    if (it.id == target.id) {
                         it.copy(
                             releaseStatus = ReleaseStatus.Loading,
                             actionState = if (it.actionState is AppActionState.Error || it.actionState is AppActionState.SignatureMismatch) {
@@ -295,18 +329,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val status = repository.fetchLatestRelease(target.catalogApp)
-            val installedInfo = repository.getInstalledInfo(packageName)
+            val status = repository.fetchLatestRelease(target.catalogApp, useETag = true)
+            val installedInfo = repository.getInstalledInfoWithTag(target.packageName)
+
+            if (status is ReleaseStatus.Success) {
+                repository.setLastCheckTime(System.currentTimeMillis())
+                _rateLimitNotice.value = null
+            } else if (status is ReleaseStatus.RateLimit) {
+                _rateLimitNotice.value = formatRateLimitMessage(status.resetEpochSeconds)
+            }
 
             _apps.update { list ->
                 list.map { item ->
-                    if (item.packageName != packageName) return@map item
+                    if (item.id != target.id) return@map item
                     when (status) {
                         is ReleaseStatus.Success -> {
-                            repository.setLastCheckTime(System.currentTimeMillis())
                             item.copy(
                                 installedVersionName = installedInfo.versionName,
                                 installedVersionCode = installedInfo.versionCode,
+                                installedReleaseTag = installedInfo.installedReleaseTag,
                                 isInstalled = installedInfo.isInstalled,
                                 installStatus = repository.computeInstallStatus(installedInfo, status.release),
                                 latestRelease = status.release,
@@ -316,6 +357,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         else -> item.copy(
                             installedVersionName = installedInfo.versionName,
                             installedVersionCode = installedInfo.versionCode,
+                            installedReleaseTag = installedInfo.installedReleaseTag,
                             isInstalled = installedInfo.isInstalled,
                             releaseStatus = status
                         )
@@ -326,20 +368,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun checkForPStoreUpdate() {
-        val selfApp = AppCatalog.apps.firstOrNull { it.isSelf } ?: return
+        val selfApp = AppCatalog.selfApp
         viewModelScope.launch {
-            val status = repository.fetchLatestRelease(selfApp)
-            val installedInfo = repository.getInstalledInfo(selfApp.packageName)
+            val status = repository.fetchLatestRelease(selfApp, useETag = true)
+            val installedInfo = repository.getInstalledInfoWithTag(selfApp.packageName)
             when (status) {
                 is ReleaseStatus.Success -> {
                     repository.setLastCheckTime(System.currentTimeMillis())
+                    _rateLimitNotice.value = null
                     val installStatus = repository.computeInstallStatus(installedInfo, status.release)
                     _apps.update { list ->
                         list.map { item ->
-                            if (item.packageName == selfApp.packageName) {
+                            if (item.id == selfApp.repoKey) {
                                 item.copy(
                                     installedVersionName = installedInfo.versionName,
                                     installedVersionCode = installedInfo.versionCode,
+                                    installedReleaseTag = installedInfo.installedReleaseTag,
                                     isInstalled = installedInfo.isInstalled,
                                     installStatus = installStatus,
                                     latestRelease = status.release,
@@ -355,13 +399,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     _uiMessages.tryEmit(UiMessage.Snackbar(message))
                 }
-                is ReleaseStatus.NoInternet -> _uiMessages.tryEmit(UiMessage.Snackbar(status.message))
-                is ReleaseStatus.RateLimit -> _uiMessages.tryEmit(UiMessage.Snackbar(status.message))
-                is ReleaseStatus.NoApkAsset -> _uiMessages.tryEmit(UiMessage.Snackbar(status.message))
-                is ReleaseStatus.NoRelease -> _uiMessages.tryEmit(UiMessage.Snackbar(status.message))
-                is ReleaseStatus.RepoNotFound -> _uiMessages.tryEmit(UiMessage.Snackbar(status.message))
-                is ReleaseStatus.Error -> _uiMessages.tryEmit(UiMessage.Snackbar(status.message))
-                ReleaseStatus.Loading -> Unit
+                is ReleaseStatus.RateLimit -> {
+                    val notice = formatRateLimitMessage(status.resetEpochSeconds)
+                    _rateLimitNotice.value = notice
+                    _uiMessages.tryEmit(UiMessage.Snackbar(notice))
+                }
+                else -> {
+                    extractReleaseErrorMessage(status)?.let { msg ->
+                        _uiMessages.tryEmit(UiMessage.Snackbar(msg))
+                    }
+                }
             }
         }
     }
@@ -370,13 +417,111 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _storeFilter.value = filter
     }
 
+    /**
+     * When tapping Update/Install (specificRelease == null), re-checks GitHub's latest release
+     * tag_name live and compares it against the installed version/tracked tag before downloading.
+     * When installing a specific rollback release from Older Versions, downloads it directly.
+     */
     fun onInstallOrUpdateClicked(item: AppItemUiState, specificRelease: ReleaseInfo? = null) {
-        if (!repository.installerHelper.canRequestPackageInstalls()) {
-            pendingInstallRequest = PendingInstallRequest(item.packageName, specificRelease)
-            _showUnknownAppsPermissionDialog.value = true
+        val currentState = _apps.value.firstOrNull { it.id == item.id }?.actionState
+        if (currentState is AppActionState.CheckingUpdate ||
+            currentState is AppActionState.Downloading ||
+            currentState is AppActionState.Verifying ||
+            currentState is AppActionState.Installing
+        ) {
             return
         }
-        executeInstall(item, specificRelease)
+
+        if (specificRelease != null) {
+            if (!repository.installerHelper.canRequestPackageInstalls()) {
+                pendingInstallRequest = PendingInstallRequest(item.id, specificRelease)
+                _showUnknownAppsPermissionDialog.value = true
+                return
+            }
+            launchDownloadAndInstall(item, specificRelease)
+            return
+        }
+
+        val job = viewModelScope.launch {
+            updateActionState(item.id, AppActionState.CheckingUpdate)
+
+            val status = repository.fetchLatestRelease(item.catalogApp, useETag = true)
+            val installedInfo = repository.getInstalledInfoWithTag(item.packageName)
+
+            if (status !is ReleaseStatus.Success) {
+                val errMsg = if (status is ReleaseStatus.RateLimit) {
+                    val notice = formatRateLimitMessage(status.resetEpochSeconds)
+                    _rateLimitNotice.value = notice
+                    notice
+                } else {
+                    extractReleaseErrorMessage(status) ?: context.getString(R.string.error_no_release)
+                }
+
+                // If we already have a cached release and hit a rate limit, allow proceeding only on explicit retry or show clear message
+                _apps.update { list ->
+                    list.map { existing ->
+                        if (existing.id != item.id) return@map existing
+                        existing.copy(
+                            installedVersionName = installedInfo.versionName,
+                            installedVersionCode = installedInfo.versionCode,
+                            installedReleaseTag = installedInfo.installedReleaseTag,
+                            isInstalled = installedInfo.isInstalled,
+                            releaseStatus = if (existing.latestRelease != null && status is ReleaseStatus.RateLimit) {
+                                existing.releaseStatus
+                            } else {
+                                status
+                            },
+                            actionState = AppActionState.Error(errMsg)
+                        )
+                    }
+                }
+                _uiMessages.tryEmit(UiMessage.Snackbar(errMsg))
+                return@launch
+            }
+
+            repository.setLastCheckTime(System.currentTimeMillis())
+            _rateLimitNotice.value = null
+            val freshRelease = status.release
+            val freshInstallStatus = repository.computeInstallStatus(installedInfo, freshRelease)
+
+            _apps.update { list ->
+                list.map { existing ->
+                    if (existing.id != item.id) return@map existing
+                    existing.copy(
+                        installedVersionName = installedInfo.versionName,
+                        installedVersionCode = installedInfo.versionCode,
+                        installedReleaseTag = installedInfo.installedReleaseTag,
+                        isInstalled = installedInfo.isInstalled,
+                        installStatus = freshInstallStatus,
+                        latestRelease = freshRelease,
+                        releaseStatus = status
+                    )
+                }
+            }
+
+            if (installedInfo.isInstalled && freshInstallStatus != AppInstallStatus.UPDATE_AVAILABLE) {
+                updateActionState(item.id, AppActionState.Idle)
+                val upToDateMsg = if (freshRelease.displayVersion.isNotBlank()) {
+                    context.getString(R.string.status_already_up_to_date_ver, freshRelease.displayVersion)
+                } else {
+                    context.getString(R.string.status_already_up_to_date)
+                }
+                _uiMessages.tryEmit(UiMessage.Snackbar(upToDateMsg))
+                return@launch
+            }
+
+            if (!repository.installerHelper.canRequestPackageInstalls()) {
+                updateActionState(item.id, AppActionState.Idle)
+                pendingInstallRequest = PendingInstallRequest(item.id, freshRelease)
+                _showUnknownAppsPermissionDialog.value = true
+                return@launch
+            }
+
+            val updatedItem = _apps.value.firstOrNull { it.id == item.id } ?: item
+            downloadAndInstallRelease(updatedItem, freshRelease)
+        }
+
+        activeDownloadJobs[item.id] = job
     }
 
     fun dismissPermissionDialog() {
@@ -399,121 +544,121 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _showUnknownAppsPermissionDialog.value = false
             val pending = pendingInstallRequest ?: return
             pendingInstallRequest = null
-            val item = _apps.value.firstOrNull { it.packageName == pending.packageName } ?: return
-            executeInstall(item, pending.specificRelease)
+            val item = _apps.value.firstOrNull { it.id == pending.appId } ?: return
+            val release = pending.verifiedRelease
+            if (release != null) {
+                launchDownloadAndInstall(item, release)
+            } else {
+                onInstallOrUpdateClicked(item)
+            }
         }
     }
 
     fun cancelDownload(item: AppItemUiState) {
-        repository.downloadManager.cancelDownload(item.packageName)
-        activeDownloadJobs[item.packageName]?.cancel()
-        activeDownloadJobs.remove(item.packageName)
-        updateActionState(item.packageName, AppActionState.Idle)
+        val downloadKey = item.packageName.ifBlank { item.id }
+        repository.downloadManager.cancelDownload(downloadKey)
+        activeDownloadJobs[item.id]?.cancel()
+        activeDownloadJobs.remove(item.id)
+        updateActionState(item.id, AppActionState.Idle)
     }
 
-    private fun executeInstall(item: AppItemUiState, specificRelease: ReleaseInfo? = null) {
-        val release = specificRelease ?: item.latestRelease
-        if (release == null) {
-            _uiMessages.tryEmit(UiMessage.Snackbar(context.getString(R.string.error_no_release)))
+    private fun launchDownloadAndInstall(item: AppItemUiState, release: ReleaseInfo) {
+        val job = viewModelScope.launch {
+            downloadAndInstallRelease(item, release)
+        }
+        activeDownloadJobs[item.id] = job
+    }
+
+    private suspend fun downloadAndInstallRelease(item: AppItemUiState, release: ReleaseInfo) {
+        val networkPref = repository.downloadOver.first()
+        if (networkPref == NetworkPreference.WIFI_ONLY && !repository.isOnUnmeteredWifi()) {
+            val msg = context.getString(R.string.error_wifi_required)
+            updateActionState(item.id, AppActionState.Error(msg))
+            _uiMessages.tryEmit(UiMessage.Snackbar(msg))
             return
         }
 
-        val job = viewModelScope.launch {
-            val networkPref = repository.downloadOver.first()
-            if (networkPref == NetworkPreference.WIFI_ONLY && !repository.isOnUnmeteredWifi()) {
-                val msg = context.getString(R.string.error_wifi_required)
-                updateActionState(item.packageName, AppActionState.Error(msg))
-                _uiMessages.tryEmit(UiMessage.Snackbar(msg))
-                return@launch
-            }
+        val targetVer = release.displayVersion
+        updateActionState(
+            item.id,
+            AppActionState.Downloading(
+                progress = 0f,
+                downloadedBytes = 0L,
+                totalBytes = release.apkSize,
+                targetVersion = targetVer
+            )
+        )
 
-            val targetVer = release.displayVersion
+        val downloadResult = repository.downloadApk(item.catalogApp, release) { progress, downloaded, total ->
             updateActionState(
-                item.packageName,
+                item.id,
                 AppActionState.Downloading(
-                    progress = 0f,
-                    downloadedBytes = 0L,
-                    totalBytes = release.apkSize,
+                    progress = progress,
+                    downloadedBytes = downloaded,
+                    totalBytes = total,
                     targetVersion = targetVer
                 )
             )
+        }
 
-            val downloadResult = repository.downloadApk(item.catalogApp, release) { progress, downloaded, total ->
-                updateActionState(
-                    item.packageName,
-                    AppActionState.Downloading(
-                        progress = progress,
-                        downloadedBytes = downloaded,
-                        totalBytes = total,
-                        targetVersion = targetVer
-                    )
-                )
-            }
+        updateCacheSizeState()
 
+        val apkFile = downloadResult.getOrElse { err ->
+            val message = err.message ?: context.getString(R.string.error_no_internet)
+            updateActionState(item.id, AppActionState.Error(message))
+            return
+        }
+
+        updateActionState(item.id, AppActionState.Verifying)
+        val details = repository.readApkDetails(apkFile)
+        if (details == null || details.packageName.isBlank()) {
+            apkFile.delete()
             updateCacheSizeState()
+            val err = context.getString(R.string.error_invalid_apk)
+            updateActionState(item.id, AppActionState.Error(err))
+            _uiMessages.tryEmit(UiMessage.Snackbar(err))
+            return
+        }
 
-            val apkFile = downloadResult.getOrElse { err ->
-                val message = err.message ?: context.getString(R.string.error_no_internet)
-                updateActionState(item.packageName, AppActionState.Error(message))
-                return@launch
+        val resolvedPackageName = if (item.packageName.isBlank()) {
+            // Learn packageName permanently from the downloaded APK archive
+            repository.learnPackageName(item.catalogApp, details.packageName)
+            _apps.update { list ->
+                list.map { existing ->
+                    if (existing.id == item.id) {
+                        existing.copy(catalogApp = existing.catalogApp.copy(packageName = details.packageName))
+                    } else existing
+                }
             }
-
-            updateActionState(item.packageName, AppActionState.Verifying)
-            val details = repository.readApkDetails(apkFile)
-            if (details == null) {
-                apkFile.delete()
-                updateCacheSizeState()
-                val err = context.getString(R.string.error_invalid_apk)
-                updateActionState(item.packageName, AppActionState.Error(err))
-                _uiMessages.tryEmit(UiMessage.Snackbar(err))
-                return@launch
-            }
-
+            details.packageName
+        } else {
             if (details.packageName != item.packageName) {
                 apkFile.delete()
                 updateCacheSizeState()
                 val err = context.getString(R.string.error_package_mismatch)
-                updateActionState(item.packageName, AppActionState.Error(err))
+                updateActionState(item.id, AppActionState.Error(err))
                 _uiMessages.tryEmit(UiMessage.Snackbar(err))
-                return@launch
+                return
             }
-
-            // Only update latest cached APK metadata if installing the latest release
-            if (specificRelease == null) {
-                repository.saveApkVersionMetadata(item.catalogApp, details.versionName, details.versionCode)
-                val updatedRelease = release.copy(
-                    apkVersionName = details.versionName,
-                    apkVersionCode = details.versionCode
-                )
-                val installedInfo = repository.getInstalledInfo(item.packageName)
-                val status = repository.computeInstallStatus(installedInfo, updatedRelease)
-                _apps.update { list ->
-                    list.map {
-                        if (it.packageName == item.packageName) {
-                            it.copy(latestRelease = updatedRelease, installStatus = status)
-                        } else it
-                    }
-                }
-            }
-
-            val finalVersionLabel = details.versionName ?: targetVer
-            updateActionState(item.packageName, AppActionState.Installing(finalVersionLabel))
-
-            val installRes = repository.installerHelper.installApk(
-                apkFile = apkFile,
-                appName = item.catalogApp.displayName,
-                expectedPackageName = item.packageName,
-                targetVersion = finalVersionLabel
-            )
-
-            installRes.onFailure { err ->
-                val msg = err.message ?: context.getString(R.string.error_generic_install)
-                updateActionState(item.packageName, AppActionState.Error(msg))
-                _uiMessages.tryEmit(UiMessage.Snackbar(msg))
-            }
+            item.packageName
         }
 
-        activeDownloadJobs[item.packageName] = job
+        // Always track and report the GitHub release tag_name (ignore internal APK versionName/versionCode)
+        val releaseTagToTrack = release.tagName.ifBlank { targetVer }
+        updateActionState(item.id, AppActionState.Installing(VersionComparator.cleanVersion(releaseTagToTrack)))
+
+        val installRes = repository.installerHelper.installApk(
+            apkFile = apkFile,
+            appName = item.catalogApp.displayName,
+            expectedPackageName = resolvedPackageName,
+            targetVersion = releaseTagToTrack
+        )
+
+        installRes.onFailure { err ->
+            val msg = err.message ?: context.getString(R.string.error_generic_install)
+            updateActionState(item.id, AppActionState.Error(msg))
+            _uiMessages.tryEmit(UiMessage.Snackbar(msg))
+        }
     }
 
     fun updateAllApps() {
@@ -529,7 +674,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (!repository.installerHelper.canRequestPackageInstalls()) {
-            pendingInstallRequest = PendingInstallRequest(updatable.first().packageName)
+            pendingInstallRequest = PendingInstallRequest(updatable.first().id)
             _showUnknownAppsPermissionDialog.value = true
             return
         }
@@ -541,14 +686,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             for (index in updatable.indices) {
                 val target = updatable[index]
                 _updatingAllCurrentIndex.value = index + 1
-                val latestState = _apps.value.firstOrNull { it.packageName == target.packageName } ?: target
-                executeInstall(latestState)
+                val latestState = _apps.value.firstOrNull { it.id == target.id } ?: target
+                onInstallOrUpdateClicked(latestState)
 
                 var waitedMs = 0
                 while (waitedMs < 90_000) {
                     delay(1_000)
                     waitedMs += 1_000
-                    val current = _apps.value.firstOrNull { it.packageName == target.packageName }
+                    val current = _apps.value.firstOrNull { it.id == target.id }
                     val state = current?.actionState
                     if (state is AppActionState.Idle ||
                         state is AppActionState.InstalledSuccess ||
@@ -565,6 +710,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openApp(item: AppItemUiState) {
+        if (item.packageName.isBlank()) {
+            _uiMessages.tryEmit(UiMessage.Snackbar(context.getString(R.string.error_cannot_open)))
+            return
+        }
         val launchIntent = context.packageManager.getLaunchIntentForPackage(item.packageName)
         if (launchIntent != null) {
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -575,10 +724,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun uninstallApp(item: AppItemUiState) {
+        if (item.packageName.isBlank()) return
         val intent = repository.installerHelper.createUninstallIntent(item.packageName)
         try {
             context.startActivity(intent)
-            updateActionState(item.packageName, AppActionState.Idle)
+            updateActionState(item.id, AppActionState.Idle)
         } catch (_: Exception) {
             _uiMessages.tryEmit(UiMessage.Snackbar(context.getString(R.string.error_generic_install)))
         }
@@ -597,16 +747,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadOlderReleases(item: AppItemUiState) {
-        updateOlderReleasesState(item.packageName, OlderReleasesState.Loading)
+        updateOlderReleasesState(item.id, OlderReleasesState.Loading)
         viewModelScope.launch {
             val result = repository.fetchAllReleases(item.catalogApp)
             result.fold(
                 onSuccess = { releases ->
-                    updateOlderReleasesState(item.packageName, OlderReleasesState.Success(releases))
+                    updateOlderReleasesState(item.id, OlderReleasesState.Success(releases))
                 },
                 onFailure = { error ->
                     updateOlderReleasesState(
-                        item.packageName,
+                        item.id,
                         OlderReleasesState.Error(error.message ?: context.getString(R.string.error_no_internet))
                     )
                 }
@@ -623,12 +773,123 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun copyAllAppsInfo() {
-        val allApps = AppCatalog.apps
+        val allApps = _apps.value.map { it.catalogApp }.ifEmpty { listOf(AppCatalog.selfApp) }
         val text = AppCatalog.formatAllAppsInfo(allApps)
         copyToClipboard(
             text = text,
             confirmation = context.getString(R.string.copied_all_apps, allApps.size)
         )
+    }
+
+    /**
+     * Validates and adds a custom GitHub Releases app to P Store's catalog, then immediately checks its release.
+     * Returns an error message string if validation fails, or null on success.
+     */
+    fun addApp(
+        displayNameInput: String,
+        packageNameInput: String,
+        repoInput: String,
+        colorPreset: BrandColorPreset,
+        iconType: AppIconType
+    ): String? {
+        val displayName = displayNameInput.trim()
+        if (displayName.isEmpty()) {
+            return context.getString(R.string.error_add_app_name_empty)
+        }
+
+        val packageName = packageNameInput.trim()
+        if (!AppCatalog.isValidPackageName(packageName)) {
+            return context.getString(R.string.error_add_app_package_invalid)
+        }
+
+        val parsedRepo = AppCatalog.parseGitHubRepo(repoInput)
+            ?: return context.getString(R.string.error_add_app_repo_invalid)
+
+        val candidateKey = "${parsedRepo.first}/${parsedRepo.second}".lowercase()
+        if (_apps.value.any {
+                it.id == candidateKey ||
+                    (it.packageName.isNotBlank() && it.packageName.equals(packageName, ignoreCase = true))
+            }
+        ) {
+            return context.getString(R.string.error_add_app_duplicate)
+        }
+
+        val newApp = CatalogApp(
+            displayName = displayName,
+            packageName = packageName,
+            githubOwner = parsedRepo.first,
+            githubRepo = parsedRepo.second,
+            brandColorDark = colorPreset.darkColor,
+            brandColorLight = colorPreset.lightColor,
+            darkTileTint = colorPreset.darkTileTint,
+            icon = iconType,
+            showInLauncher = true,
+            isSelf = false
+        )
+
+        viewModelScope.launch {
+            repository.addAppToCatalog(newApp)
+            val installedInfo = repository.getInstalledInfoWithTag(newApp.packageName)
+            val cachedRelease = repository.getCachedRelease(newApp)
+            val autoUpdateMode = repository.getAutoUpdateMode(newApp.repoKey)
+            val installStatus = repository.computeInstallStatus(installedInfo, cachedRelease)
+
+            val newItem = AppItemUiState(
+                catalogApp = newApp,
+                installedVersionName = installedInfo.versionName,
+                installedVersionCode = installedInfo.versionCode,
+                installedReleaseTag = installedInfo.installedReleaseTag,
+                isInstalled = installedInfo.isInstalled,
+                installStatus = installStatus,
+                latestRelease = cachedRelease,
+                releaseStatus = if (cachedRelease != null) ReleaseStatus.Success(cachedRelease) else ReleaseStatus.Loading,
+                autoUpdateMode = autoUpdateMode
+            )
+
+            _apps.update { current ->
+                val withoutSelf = current.filterNot { it.catalogApp.isSelf }
+                val selfApps = current.filter { it.catalogApp.isSelf }
+                withoutSelf + newItem + selfApps
+            }
+            _hiddenApps.value = repository.getHiddenApps()
+
+            _uiMessages.tryEmit(
+                UiMessage.Snackbar(context.getString(R.string.app_added_snackbar, newApp.displayName))
+            )
+            refreshSingleApp(newApp.repoKey)
+        }
+        return null
+    }
+
+    /**
+     * Hides a repo from P Store without uninstalling the app from Android.
+     * Can be restored later from Settings -> Hidden apps.
+     */
+    fun hideApp(item: AppItemUiState) {
+        if (item.catalogApp.isSelf) return
+        cancelDownload(item)
+        viewModelScope.launch {
+            repository.hideApp(item.id)
+            _apps.update { current -> current.filterNot { it.id == item.id } }
+            _hiddenApps.value = repository.getHiddenApps()
+            _uiMessages.tryEmit(
+                UiMessage.Snackbar(context.getString(R.string.app_hidden_snackbar, item.catalogApp.displayName))
+            )
+        }
+    }
+
+    fun unhideApp(hiddenApp: HiddenAppInfo) {
+        viewModelScope.launch {
+            repository.unhideApp(hiddenApp.repoKey)
+            loadLocalState()
+            _uiMessages.tryEmit(
+                UiMessage.Snackbar(context.getString(R.string.app_unhidden_snackbar, hiddenApp.displayName))
+            )
+            // If the unhidden app wasn't in local cache yet, refresh from GitHub
+            if (_apps.value.none { it.id == hiddenApp.repoKey }) {
+                refreshReleases()
+            }
+        }
     }
 
     private fun copyToClipboard(text: String, confirmation: String) {
@@ -676,14 +937,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AutoUpdateMode.ALWAYS -> AutoUpdateMode.OFF
             AutoUpdateMode.OFF -> AutoUpdateMode.WIFI_ONLY
         }
-        setPerAppAutoUpdate(item.packageName, next)
+        setPerAppAutoUpdate(item.id, next)
     }
 
-    fun setPerAppAutoUpdate(packageName: String, mode: AutoUpdateMode) {
+    fun setPerAppAutoUpdate(appId: String, mode: AutoUpdateMode) {
         viewModelScope.launch {
-            repository.setAutoUpdateMode(packageName, mode)
+            repository.setAutoUpdateMode(appId, mode)
             _apps.update { list ->
-                list.map { if (it.packageName == packageName) it.copy(autoUpdateMode = mode) else it }
+                list.map { if (it.id == appId) it.copy(autoUpdateMode = mode) else it }
             }
         }
     }
@@ -730,15 +991,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun updateActionState(packageName: String, state: AppActionState) {
+    private fun extractReleaseErrorMessage(status: ReleaseStatus): String? = when (status) {
+        is ReleaseStatus.NoInternet -> status.message
+        is ReleaseStatus.RateLimit -> formatRateLimitMessage(status.resetEpochSeconds)
+        is ReleaseStatus.NoApkAsset -> status.message
+        is ReleaseStatus.NoRelease -> status.message
+        is ReleaseStatus.RepoNotFound -> status.message
+        is ReleaseStatus.Error -> status.message
+        else -> null
+    }
+
+    private fun updateActionState(appId: String, state: AppActionState) {
         _apps.update { list ->
-            list.map { if (it.packageName == packageName) it.copy(actionState = state) else it }
+            list.map { if (it.id == appId) it.copy(actionState = state) else it }
         }
     }
 
-    private fun updateOlderReleasesState(packageName: String, state: OlderReleasesState) {
+    private fun updateActionStateByIdOrPackage(appId: String, packageName: String, state: AppActionState) {
         _apps.update { list ->
-            list.map { if (it.packageName == packageName) it.copy(olderReleasesState = state) else it }
+            list.map {
+                if (it.id == appId || (packageName.isNotBlank() && it.packageName == packageName)) {
+                    it.copy(actionState = state)
+                } else it
+            }
+        }
+    }
+
+    private fun updateOlderReleasesState(appId: String, state: OlderReleasesState) {
+        _apps.update { list ->
+            list.map { if (it.id == appId) it.copy(olderReleasesState = state) else it }
         }
     }
 

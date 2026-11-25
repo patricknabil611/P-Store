@@ -27,8 +27,10 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -60,6 +62,7 @@ import com.example.model.AutoUpdateMode
 import com.example.model.ReleaseInfo
 import com.example.ui.components.AppBrandIcon
 import com.example.ui.components.ErrorActionBox
+import com.example.ui.components.NewAppBadge
 import com.example.ui.components.OlderVersionsDialog
 import com.example.ui.dark.extractReleaseError
 import com.example.ui.theme.PStoreTheme
@@ -80,6 +83,7 @@ fun AppDetailScreen(
     onCycleAutoUpdate: () -> Unit,
     onLoadOlderReleases: () -> Unit,
     onCopyAppInfo: () -> Unit,
+    onHideApp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BackHandler { onNavigateBack() }
@@ -106,7 +110,7 @@ fun AppDetailScreen(
     } else {
         item.catalogApp.displayName
     }
-    val installedVer = VersionComparator.cleanVersion(item.installedVersionName)
+    val installedVer = VersionComparator.cleanVersion(item.effectiveInstalledVersion)
     val latestVer = item.latestRelease?.displayVersion.orEmpty()
     val sizeStr = item.latestRelease?.let { Formatters.formatFileSize(it.apkSize) }.orEmpty()
 
@@ -124,31 +128,60 @@ fun AppDetailScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
-            // Back button (44dp)
+            // Top bar: Back button (44dp) + Delete button (44dp for non-self apps)
             item(key = "detail_back") {
-                Surface(
-                    onClick = onNavigateBack,
-                    shape = if (colors.isDark) RoundedCornerShape(14.dp) else CircleShape,
-                    color = colors.card,
-                    border = if (colors.isDark) BorderStroke(1.dp, colors.cardBorder) else null,
-                    shadowElevation = if (colors.isDark) 0.dp else 2.dp,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .testTag("detail_back_button")
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back),
-                            tint = colors.primaryText,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Surface(
+                        onClick = onNavigateBack,
+                        shape = if (colors.isDark) RoundedCornerShape(14.dp) else CircleShape,
+                        color = colors.card,
+                        border = if (colors.isDark) BorderStroke(1.dp, colors.cardBorder) else null,
+                        shadowElevation = if (colors.isDark) 0.dp else 2.dp,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("detail_back_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = stringResource(R.string.cd_back),
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (!item.catalogApp.isSelf) {
+                        Surface(
+                            onClick = onHideApp,
+                            shape = if (colors.isDark) RoundedCornerShape(14.dp) else CircleShape,
+                            color = colors.card,
+                            border = if (colors.isDark) BorderStroke(1.dp, colors.error.copy(alpha = 0.45f)) else null,
+                            shadowElevation = if (colors.isDark) 0.dp else 2.dp,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .testTag("detail_top_hide_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.VisibilityOff,
+                                    contentDescription = stringResource(R.string.cd_hide_app),
+                                    tint = colors.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            // Hero header: 84dp icon + 26sp app name + "Installed vX · Latest vY"
+            // Hero header: 84dp icon + 26sp app name + optional NEW badge + description + version summary
             item(key = "detail_hero") {
+                val isNew = remember(item.catalogApp.firstDiscoveredAtMillis) { item.isNewlyDiscovered() }
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
@@ -161,11 +194,29 @@ fun AppDetailScreen(
                         cornerRadius = 24.dp
                     )
                     Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = displayName,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = colors.primaryText
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = displayName,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = colors.primaryText
+                        )
+                        if (isNew) {
+                            NewAppBadge()
+                        }
+                    }
+                    if (item.catalogApp.description.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = item.catalogApp.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     val versionSummary = when {
                         item.isInstalled && latestVer.isNotBlank() -> {
@@ -290,24 +341,26 @@ fun AppDetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                val primaryLabel = when (item.installStatus) {
-                                    AppInstallStatus.UPDATE_AVAILABLE -> {
+                                val isChecking = action is AppActionState.CheckingUpdate
+                                val primaryLabel = when {
+                                    isChecking -> stringResource(R.string.status_checking_update)
+                                    item.installStatus == AppInstallStatus.UPDATE_AVAILABLE -> {
                                         if (sizeStr.isNotBlank()) {
                                             stringResource(R.string.action_update_size, sizeStr)
                                         } else {
                                             stringResource(R.string.action_update)
                                         }
                                     }
-                                    AppInstallStatus.NOT_INSTALLED -> {
+                                    item.installStatus == AppInstallStatus.NOT_INSTALLED -> {
                                         if (sizeStr.isNotBlank()) {
                                             stringResource(R.string.action_install_size, sizeStr)
                                         } else {
                                             stringResource(R.string.action_install)
                                         }
                                     }
-                                    AppInstallStatus.UP_TO_DATE -> stringResource(R.string.status_up_to_date)
+                                    else -> stringResource(R.string.status_up_to_date)
                                 }
-                                val primaryEnabled = when (item.installStatus) {
+                                val primaryEnabled = !isChecking && when (item.installStatus) {
                                     AppInstallStatus.UPDATE_AVAILABLE -> item.latestRelease != null
                                     AppInstallStatus.NOT_INSTALLED -> item.latestRelease != null
                                     AppInstallStatus.UP_TO_DATE -> false
@@ -328,6 +381,14 @@ fun AppDetailScreen(
                                         .heightIn(min = 50.dp)
                                         .testTag("detail_primary_action_button")
                                 ) {
+                                    if (isChecking) {
+                                        CircularProgressIndicator(
+                                            color = colors.accent,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
                                     Text(
                                         text = primaryLabel,
                                         style = MaterialTheme.typography.labelLarge,
@@ -336,7 +397,7 @@ fun AppDetailScreen(
                                     )
                                 }
 
-                                if (item.isInstalled && !item.catalogApp.isSelf) {
+                                if (item.isInstalled && item.packageName.isNotBlank() && !item.catalogApp.isSelf) {
                                     OutlinedButton(
                                         onClick = onOpenApp,
                                         shape = RoundedCornerShape(buttonRadius),
@@ -462,7 +523,7 @@ fun AppDetailScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         DetailInfoRow(
                             label = stringResource(R.string.info_package_name),
-                            value = item.packageName,
+                            value = item.packageName.ifBlank { stringResource(R.string.info_package_pending) },
                             onClick = null
                         )
                         HorizontalDivider(color = colors.divider, modifier = Modifier.padding(horizontal = 18.dp))
@@ -499,8 +560,11 @@ fun AppDetailScreen(
                         )
                         HorizontalDivider(color = colors.divider, modifier = Modifier.padding(horizontal = 18.dp))
 
-                        // Copy app info button inside info card
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        // Copy app info & Remove from P Store buttons inside info card
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
                             OutlinedButton(
                                 onClick = onCopyAppInfo,
                                 shape = RoundedCornerShape(buttonRadius),
@@ -522,6 +586,32 @@ fun AppDetailScreen(
                                     style = MaterialTheme.typography.labelLarge,
                                     color = colors.primaryText
                                 )
+                            }
+
+                            if (!item.catalogApp.isSelf) {
+                                OutlinedButton(
+                                    onClick = onHideApp,
+                                    shape = RoundedCornerShape(buttonRadius),
+                                    border = BorderStroke(1.dp, colors.error.copy(alpha = 0.5f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 46.dp)
+                                        .testTag("detail_hide_app_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.VisibilityOff,
+                                        contentDescription = stringResource(R.string.cd_hide_app),
+                                        tint = colors.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.action_hide_from_pstore),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = colors.error,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
                     }

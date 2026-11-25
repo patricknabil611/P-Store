@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Refresh
@@ -73,7 +74,10 @@ import com.example.model.RecentUpdateRecord
 import com.example.model.ReleaseStatus
 import com.example.ui.components.AppBrandIcon
 import com.example.ui.components.AppContextMenu
+import com.example.ui.components.EmptyCatalogCard
 import com.example.ui.components.ErrorActionBox
+import com.example.ui.components.NewAppBadge
+import com.example.ui.components.RateLimitNoticeBanner
 import com.example.ui.dark.extractReleaseError
 import com.example.ui.theme.PStoreTheme
 import com.example.util.Formatters
@@ -95,9 +99,11 @@ fun CleanShelfScreen(
     updatingCurrent: Int,
     updatingTotal: Int,
     lastCheckedAtMillis: Long,
+    rateLimitNotice: String?,
     snackbarHostState: SnackbarHostState,
     onSelectTab: (ShelfTab) -> Unit,
     onRefresh: () -> Unit,
+    onAddApp: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenApp: (AppItemUiState) -> Unit,
     onInstallOrUpdate: (AppItemUiState) -> Unit,
@@ -105,6 +111,7 @@ fun CleanShelfScreen(
     onUpdateAll: () -> Unit,
     onOpenDetail: (AppItemUiState) -> Unit,
     onCopyAppInfo: (AppItemUiState) -> Unit,
+    onHideApp: (AppItemUiState) -> Unit,
     onRetryApp: (AppItemUiState) -> Unit,
     onUninstallApp: (AppItemUiState) -> Unit,
     modifier: Modifier = Modifier
@@ -148,7 +155,25 @@ fun CleanShelfScreen(
                     color = colors.primaryText
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = onAddApp,
+                        shape = CircleShape,
+                        color = colors.accent,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("shelf_add_app_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.Add,
+                                contentDescription = stringResource(R.string.cd_add_app),
+                                tint = colors.onAccent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                     ShelfRoundIconButton(
                         isSpinning = isRefreshing,
                         enabled = !isRefreshing,
@@ -189,31 +214,38 @@ fun CleanShelfScreen(
                     ShelfTab.MY_APPS -> {
                         ShelfMyAppsContent(
                             launcherApps = launcherApps,
+                            isRefreshing = isRefreshing,
                             pendingUpdateCount = pendingUpdates.size,
                             isUpdatingAll = isUpdatingAll,
                             updatingCurrent = updatingCurrent,
                             updatingTotal = updatingTotal,
                             lastCheckedAtMillis = lastCheckedAtMillis,
+                            rateLimitNotice = rateLimitNotice,
                             onUpdateAll = onUpdateAll,
                             onOpenApp = onOpenApp,
                             onInstallOrUpdate = onInstallOrUpdate,
                             onCancelDownload = onCancelDownload,
                             onOpenDetail = onOpenDetail,
                             onCopyAppInfo = onCopyAppInfo,
+                            onHideApp = onHideApp,
                             onRetryApp = onRetryApp,
                             onUninstallApp = onUninstallApp
                         )
                     }
                     ShelfTab.UPDATES -> {
                         ShelfUpdatesContent(
+                            allApps = apps,
                             activeInstallItems = activeInstallItems,
                             pendingUpdates = pendingUpdates,
                             recentUpdates = recentUpdates,
+                            lastCheckedAtMillis = lastCheckedAtMillis,
+                            rateLimitNotice = rateLimitNotice,
                             onInstallOrUpdate = onInstallOrUpdate,
                             onCancelDownload = onCancelDownload,
                             onOpenDetail = onOpenDetail,
                             onOpenApp = onOpenApp,
                             onCopyAppInfo = onCopyAppInfo,
+                            onHideApp = onHideApp,
                             onUninstallApp = onUninstallApp
                         )
                     }
@@ -337,17 +369,20 @@ private fun SegmentTabItem(
 @Composable
 private fun ShelfMyAppsContent(
     launcherApps: List<AppItemUiState>,
+    isRefreshing: Boolean,
     pendingUpdateCount: Int,
     isUpdatingAll: Boolean,
     updatingCurrent: Int,
     updatingTotal: Int,
     lastCheckedAtMillis: Long,
+    rateLimitNotice: String?,
     onUpdateAll: () -> Unit,
     onOpenApp: (AppItemUiState) -> Unit,
     onInstallOrUpdate: (AppItemUiState) -> Unit,
     onCancelDownload: (AppItemUiState) -> Unit,
     onOpenDetail: (AppItemUiState) -> Unit,
     onCopyAppInfo: (AppItemUiState) -> Unit,
+    onHideApp: (AppItemUiState) -> Unit,
     onRetryApp: (AppItemUiState) -> Unit,
     onUninstallApp: (AppItemUiState) -> Unit
 ) {
@@ -361,6 +396,11 @@ private fun ShelfMyAppsContent(
             .fillMaxSize()
             .navigationBarsPadding()
     ) {
+        if (!rateLimitNotice.isNullOrBlank()) {
+            item(key = "shelf_rate_limit") {
+                RateLimitNoticeBanner(message = rateLimitNotice)
+            }
+        }
         if (pendingUpdateCount > 0 || isUpdatingAll) {
             item(key = "shelf_update_banner") {
                 Surface(
@@ -420,31 +460,38 @@ private fun ShelfMyAppsContent(
             }
         }
 
-        // Single white card containing all launcher apps with subtle row dividers
-        item(key = "shelf_apps_card") {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.card,
-                shadowElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    launcherApps.forEachIndexed { index, item ->
-                        ShelfAppRow(
-                            item = item,
-                            onRowClick = { onOpenDetail(item) },
-                            onOpen = { onOpenApp(item) },
-                            onInstallOrUpdate = { onInstallOrUpdate(item) },
-                            onCancelDownload = { onCancelDownload(item) },
-                            onCopyInfo = { onCopyAppInfo(item) },
-                            onRetry = { onRetryApp(item) },
-                            onUninstall = { onUninstallApp(item) }
-                        )
-                        if (index < launcherApps.lastIndex) {
-                            HorizontalDivider(
-                                color = colors.divider,
-                                modifier = Modifier.padding(horizontal = 16.dp)
+        // Single white card containing all launcher apps with subtle row dividers, or empty state
+        if (launcherApps.isEmpty() && !isRefreshing) {
+            item(key = "shelf_empty_catalog") {
+                EmptyCatalogCard()
+            }
+        } else if (launcherApps.isNotEmpty()) {
+            item(key = "shelf_apps_card") {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = colors.card,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        launcherApps.forEachIndexed { index, item ->
+                            ShelfAppRow(
+                                item = item,
+                                onRowClick = { onOpenDetail(item) },
+                                onOpen = { onOpenApp(item) },
+                                onInstallOrUpdate = { onInstallOrUpdate(item) },
+                                onCancelDownload = { onCancelDownload(item) },
+                                onCopyInfo = { onCopyAppInfo(item) },
+                                onHide = { onHideApp(item) },
+                                onRetry = { onRetryApp(item) },
+                                onUninstall = { onUninstallApp(item) }
                             )
+                            if (index < launcherApps.lastIndex) {
+                                HorizontalDivider(
+                                    color = colors.divider,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -475,11 +522,13 @@ private fun ShelfAppRow(
     onInstallOrUpdate: () -> Unit,
     onCancelDownload: () -> Unit,
     onCopyInfo: () -> Unit,
+    onHide: () -> Unit,
     onRetry: () -> Unit,
     onUninstall: () -> Unit
 ) {
     val colors = PStoreTheme.colors
     var menuExpanded by remember { mutableStateOf(false) }
+    val isNew = remember(item.catalogApp.firstDiscoveredAtMillis) { item.isNewlyDiscovered() }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -490,7 +539,7 @@ private fun ShelfAppRow(
                     onLongClick = { menuExpanded = true }
                 )
                 .padding(horizontal = 16.dp, vertical = 14.dp)
-                .testTag("shelf_row_${item.packageName}")
+                .testTag("shelf_row_${item.id}")
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -505,13 +554,22 @@ private fun ShelfAppRow(
                 Spacer(modifier = Modifier.width(14.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.catalogApp.displayName,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = colors.primaryText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = item.catalogApp.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.primaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isNew) {
+                            NewAppBadge()
+                        }
+                    }
                     Spacer(modifier = Modifier.height(3.dp))
                     val (statusText, isHighlight) = buildShelfStatusText(item)
                     Text(
@@ -572,7 +630,8 @@ private fun ShelfAppRow(
             onDismiss = { menuExpanded = false },
             onOpen = onOpen,
             onUpdate = onInstallOrUpdate,
-            onCopyInfo = onCopyInfo
+            onCopyInfo = onCopyInfo,
+            onHide = onHide
         )
     }
 }
@@ -616,6 +675,7 @@ private fun ShelfPillActionButton(
                 }
             }
         }
+        is AppActionState.CheckingUpdate,
         is AppActionState.Verifying,
         is AppActionState.Installing -> {
             Box(
@@ -697,7 +757,10 @@ private fun ShelfPillActionButton(
 
 @Composable
 private fun buildShelfStatusText(item: AppItemUiState): Pair<String, Boolean> {
-    val installedVer = VersionComparator.cleanVersion(item.installedVersionName)
+    if (item.actionState is AppActionState.CheckingUpdate) {
+        return stringResource(R.string.status_checking_update) to true
+    }
+    val installedVer = VersionComparator.cleanVersion(item.effectiveInstalledVersion)
     val release = item.latestRelease
     return when {
         item.releaseStatus is ReleaseStatus.Loading && release == null -> {
@@ -723,22 +786,27 @@ private fun buildShelfStatusText(item: AppItemUiState): Pair<String, Boolean> {
 
 @Composable
 private fun ShelfUpdatesContent(
+    allApps: List<AppItemUiState>,
     activeInstallItems: List<AppItemUiState>,
     pendingUpdates: List<AppItemUiState>,
     recentUpdates: List<RecentUpdateRecord>,
+    lastCheckedAtMillis: Long,
+    rateLimitNotice: String?,
     onInstallOrUpdate: (AppItemUiState) -> Unit,
     onCancelDownload: (AppItemUiState) -> Unit,
     onOpenDetail: (AppItemUiState) -> Unit,
     onOpenApp: (AppItemUiState) -> Unit,
     onCopyAppInfo: (AppItemUiState) -> Unit,
+    onHideApp: (AppItemUiState) -> Unit,
     onUninstallApp: (AppItemUiState) -> Unit
 ) {
     val colors = PStoreTheme.colors
-    val activePackageSet = remember(activeInstallItems) {
-        activeInstallItems.map { it.packageName }.toSet()
+    val context = LocalContext.current
+    val activeIdSet = remember(activeInstallItems) {
+        activeInstallItems.map { it.id }.toSet()
     }
-    val remainingPending = remember(pendingUpdates, activePackageSet) {
-        pendingUpdates.filterNot { it.packageName in activePackageSet }
+    val remainingPending = remember(pendingUpdates, activeIdSet) {
+        pendingUpdates.filterNot { it.id in activeIdSet }
     }
     val featuredNotesApp = remember(activeInstallItems, pendingUpdates) {
         activeInstallItems.firstOrNull { !it.latestRelease?.body.isNullOrBlank() }
@@ -752,6 +820,12 @@ private fun ShelfUpdatesContent(
             .fillMaxSize()
             .navigationBarsPadding()
     ) {
+        if (!rateLimitNotice.isNullOrBlank()) {
+            item(key = "updates_rate_limit") {
+                RateLimitNoticeBanner(message = rateLimitNotice)
+            }
+        }
+
         // 1. Installing section (active downloads / installs)
         if (activeInstallItems.isNotEmpty()) {
             item(key = "installing_label") {
@@ -762,7 +836,7 @@ private fun ShelfUpdatesContent(
                 )
             }
 
-            items(activeInstallItems, key = { "active_${it.packageName}" }) { item ->
+            items(activeInstallItems, key = { "active_${it.id}" }) { item ->
                 ShelfInstallingCard(
                     item = item,
                     onCancel = { onCancelDownload(item) }
@@ -845,6 +919,7 @@ private fun ShelfUpdatesContent(
                                 onOpen = { onOpenApp(item) },
                                 onUpdate = { onInstallOrUpdate(item) },
                                 onCopyInfo = { onCopyAppInfo(item) },
+                                onHide = { onHideApp(item) },
                                 onUninstall = { onUninstallApp(item) }
                             )
                             if (index < remainingPending.lastIndex) {
@@ -914,7 +989,10 @@ private fun ShelfUpdatesContent(
                 } else {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         recentUpdates.forEachIndexed { index, record ->
-                            val catalogApp = AppCatalog.findByPackageName(record.packageName)
+                            val catalogApp = allApps.firstOrNull {
+                                (record.repoKey.isNotBlank() && it.id == record.repoKey) ||
+                                    (record.packageName.isNotBlank() && it.packageName == record.packageName)
+                            }?.catalogApp ?: if (record.packageName == AppCatalog.SELF_PACKAGE_NAME) AppCatalog.selfApp else null
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
@@ -956,6 +1034,19 @@ private fun ShelfUpdatesContent(
                 }
             }
         }
+
+        // Last checked footer on Updates tab
+        item(key = "updates_sync_footer") {
+            Text(
+                text = Formatters.formatRelativeChecked(context, lastCheckedAtMillis, withSyncPrefix = false),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.secondaryText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+            )
+        }
     }
 }
 
@@ -970,7 +1061,7 @@ private fun ShelfInstallingCard(
     } else {
         item.catalogApp.displayName
     }
-    val installedVer = VersionComparator.cleanVersion(item.installedVersionName)
+    val installedVer = VersionComparator.cleanVersion(item.effectiveInstalledVersion)
     val action = item.actionState
     val targetVer = when (action) {
         is AppActionState.Downloading -> action.targetVersion
@@ -1118,19 +1209,23 @@ private fun ShelfPendingUpdateRow(
     onOpen: () -> Unit,
     onUpdate: () -> Unit,
     onCopyInfo: () -> Unit,
+    onHide: () -> Unit,
     onUninstall: () -> Unit
 ) {
     val colors = PStoreTheme.colors
     var menuExpanded by remember { mutableStateOf(false) }
+    val isNew = remember(item.catalogApp.firstDiscoveredAtMillis) { item.isNewlyDiscovered() }
     val title = if (item.catalogApp.isSelf) {
         stringResource(R.string.pstore_this_app)
     } else {
         item.catalogApp.displayName
     }
-    val installedVer = VersionComparator.cleanVersion(item.installedVersionName)
+    val installedVer = VersionComparator.cleanVersion(item.effectiveInstalledVersion)
     val release = item.latestRelease
     val sizeStr = release?.let { Formatters.formatFileSize(it.apkSize) }.orEmpty()
+    val isCheckingUpdate = item.actionState is AppActionState.CheckingUpdate
     val subtitle = when {
+        isCheckingUpdate -> stringResource(R.string.status_checking_update)
         release != null && sizeStr.isNotBlank() -> {
             stringResource(R.string.status_update_arrow_size, installedVer, release.displayVersion, sizeStr)
         }
@@ -1161,13 +1256,22 @@ private fun ShelfPendingUpdateRow(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = colors.primaryText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.primaryText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isNew) {
+                            NewAppBadge()
+                        }
+                    }
                     if (subtitle.isNotBlank()) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -1178,22 +1282,35 @@ private fun ShelfPendingUpdateRow(
                     }
                 }
                 Spacer(modifier = Modifier.width(10.dp))
-                Button(
-                    onClick = onUpdate,
-                    shape = RoundedCornerShape(20.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accent,
-                        contentColor = colors.onAccent
-                    ),
-                    modifier = Modifier
-                        .heightIn(min = 44.dp)
-                        .testTag("pending_update_btn_${item.packageName}")
-                ) {
-                    Text(
-                        text = stringResource(R.string.action_update),
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                if (isCheckingUpdate) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = colors.accent,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onUpdate,
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.accent,
+                            contentColor = colors.onAccent
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 44.dp)
+                            .testTag("pending_update_btn_${item.id}")
+                    ) {
+                        Text(
+                            text = stringResource(R.string.action_update),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
 
@@ -1221,7 +1338,8 @@ private fun ShelfPendingUpdateRow(
             onDismiss = { menuExpanded = false },
             onOpen = onOpen,
             onUpdate = onUpdate,
-            onCopyInfo = onCopyInfo
+            onCopyInfo = onCopyInfo,
+            onHide = onHide
         )
     }
 }

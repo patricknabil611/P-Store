@@ -69,6 +69,15 @@ object Formatters {
         }
     }
 
+    fun formatResetTime(resetEpochSeconds: Long): String {
+        if (resetEpochSeconds <= 0L) return ""
+        return try {
+            SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(resetEpochSeconds * 1000L))
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     /**
      * Parses simple GitHub markdown release notes into clean bullet lines.
      */

@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -53,12 +55,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.pm.PackageInfoCompat
 import com.example.R
-import com.example.catalog.AppCatalog
 import com.example.model.AppItemUiState
 import com.example.model.CheckIntervalHours
+import com.example.model.HiddenAppInfo
 import com.example.model.NetworkPreference
 import com.example.model.SettingsUiState
 import com.example.model.ThemeMode
@@ -69,6 +72,8 @@ import com.example.ui.theme.PStoreTheme
 fun SettingsScreen(
     settings: SettingsUiState,
     selfAppState: AppItemUiState?,
+    hiddenApps: List<HiddenAppInfo>,
+    totalAppsCount: Int,
     snackbarHostState: SnackbarHostState?,
     showBackButton: Boolean,
     onNavigateBack: () -> Unit,
@@ -79,6 +84,7 @@ fun SettingsScreen(
     onToggleNotifications: (Boolean) -> Unit,
     onSaveGitHubToken: (String) -> Unit,
     onClearGitHubToken: () -> Unit,
+    onUnhideApp: (HiddenAppInfo) -> Unit,
     onCopyAllAppsInfo: () -> Unit,
     onClearCache: () -> Unit,
     onCheckPStoreUpdate: () -> Unit,
@@ -456,7 +462,100 @@ fun SettingsScreen(
                 }
             }
 
-            // 4. Copy all apps info & Download Cache
+            // 4. Hidden apps
+            item(key = "settings_hidden_apps") {
+                SettingsSectionHeader(text = stringResource(R.string.settings_section_hidden_apps))
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(cardRadius),
+                    color = colors.card,
+                    border = cardBorder,
+                    shadowElevation = cardElevation,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (hiddenApps.isEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.VisibilityOff,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = stringResource(R.string.settings_hidden_apps_empty),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.secondaryText
+                            )
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            hiddenApps.forEachIndexed { index, hidden ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = hidden.displayName,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = colors.primaryText,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = hidden.fullRepoName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.secondaryText,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    OutlinedButton(
+                                        onClick = { onUnhideApp(hidden) },
+                                        shape = RoundedCornerShape(buttonRadius),
+                                        border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.5f)),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 44.dp)
+                                            .testTag("unhide_app_${hidden.repoKey}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Visibility,
+                                            contentDescription = null,
+                                            tint = colors.accent,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = stringResource(R.string.action_unhide),
+                                            color = colors.accent,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+                                }
+                                if (index < hiddenApps.lastIndex) {
+                                    HorizontalDivider(
+                                        color = colors.divider,
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Copy all apps info & Download Cache
             item(key = "settings_tools") {
                 SettingsSectionHeader(text = stringResource(R.string.settings_section_tools))
                 Spacer(modifier = Modifier.height(8.dp))
@@ -475,7 +574,7 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = stringResource(R.string.settings_copy_all_desc, AppCatalog.apps.size),
+                            text = stringResource(R.string.settings_copy_all_desc, totalAppsCount),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.secondaryText
                         )

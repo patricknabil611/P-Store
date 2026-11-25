@@ -33,6 +33,8 @@ import com.example.R
 import com.example.model.AppInstallStatus
 import com.example.model.AppItemUiState
 import com.example.model.StoreFilter
+import com.example.ui.components.EmptyCatalogCard
+import com.example.ui.components.RateLimitNoticeBanner
 import com.example.ui.theme.PStoreTheme
 import com.example.util.Formatters
 
@@ -43,13 +45,16 @@ fun MidnightStoreScreen(
     selectedFilter: StoreFilter,
     isRefreshing: Boolean,
     lastCheckedAtMillis: Long,
+    rateLimitNotice: String?,
     onSelectFilter: (StoreFilter) -> Unit,
     onRefresh: () -> Unit,
+    onAddApp: () -> Unit,
     onOpenDetail: (AppItemUiState) -> Unit,
     onOpenApp: (AppItemUiState) -> Unit,
     onInstallOrUpdate: (AppItemUiState) -> Unit,
     onCancelDownload: (AppItemUiState) -> Unit,
     onCopyAppInfo: (AppItemUiState) -> Unit,
+    onHideApp: (AppItemUiState) -> Unit,
     onRetryApp: (AppItemUiState) -> Unit,
     onUninstallApp: (AppItemUiState) -> Unit,
     bottomNavSpacerDp: Int = 104,
@@ -105,10 +110,13 @@ fun MidnightStoreScreen(
                         )
                     }
 
-                    MidnightRefreshButton(
-                        isRefreshing = isRefreshing,
-                        onClick = onRefresh
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MidnightAddButton(onClick = onAddApp)
+                        MidnightRefreshButton(
+                            isRefreshing = isRefreshing,
+                            onClick = onRefresh
+                        )
+                    }
                 }
             }
 
@@ -138,7 +146,17 @@ fun MidnightStoreScreen(
                 }
             }
 
-            if (filteredApps.isEmpty()) {
+            if (!rateLimitNotice.isNullOrBlank()) {
+                item(key = "store_rate_limit") {
+                    RateLimitNoticeBanner(message = rateLimitNotice)
+                }
+            }
+
+            if (eligibleApps.isEmpty() && !isRefreshing) {
+                item(key = "store_empty_catalog") {
+                    EmptyCatalogCard(modifier = Modifier.padding(top = 8.dp))
+                }
+            } else if (filteredApps.isEmpty()) {
                 item(key = "store_empty") {
                     Surface(
                         shape = RoundedCornerShape(20.dp),
@@ -179,7 +197,7 @@ fun MidnightStoreScreen(
                     }
                 }
             } else {
-                items(filteredApps, key = { it.packageName }) { item ->
+                items(filteredApps, key = { it.id }) { item ->
                     MidnightUpdateCard(
                         item = item,
                         onClick = { onOpenDetail(item) },
@@ -187,6 +205,7 @@ fun MidnightStoreScreen(
                         onInstallOrUpdate = { onInstallOrUpdate(item) },
                         onCancelDownload = { onCancelDownload(item) },
                         onCopyInfo = { onCopyAppInfo(item) },
+                        onHide = { onHideApp(item) },
                         onRetry = { onRetryApp(item) },
                         onUninstall = { onUninstallApp(item) },
                         showReleaseNotesPreview = true

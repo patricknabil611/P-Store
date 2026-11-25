@@ -3,7 +3,7 @@ package com.example.util
 object VersionComparator {
 
     /**
-     * Cleans a version string by removing leading 'v'/'V' and whitespace.
+     * Cleans a version or GitHub tag string by removing leading 'v'/'V' and whitespace.
      */
     fun cleanVersion(version: String?): String {
         if (version == null) return ""
@@ -28,7 +28,6 @@ object VersionComparator {
         val hasDigits2 = clean2.any { it.isDigit() }
         if (!hasDigits1 || !hasDigits2) return null
 
-        // Extract numeric segments, e.g. "1.10.0" -> [1, 10, 0]
         val parts1 = clean1.split(".", "-", "_")
         val parts2 = clean2.split(".", "-", "_")
 
@@ -59,26 +58,27 @@ object VersionComparator {
     }
 
     /**
-     * Checks if the latest version is newer than the installed version.
+     * Returns true when the installed version/tag matches the GitHub release tag_name.
+     * Ignores leading 'v'/'V' and treats semantically identical numbers (e.g. 1.2 and 1.2.0) as equal.
      */
-    fun isUpdateAvailable(
-        installedVersionName: String?,
-        installedVersionCode: Long?,
-        latestVersionName: String,
-        apkVersionCode: Long? = null
+    fun areTagsEqual(installedVersion: String?, githubTagName: String?): Boolean {
+        val cleanInstalled = cleanVersion(installedVersion)
+        val cleanTag = cleanVersion(githubTagName)
+        if (cleanInstalled.isEmpty() || cleanTag.isEmpty()) return false
+        if (cleanInstalled.equals(cleanTag, ignoreCase = true)) return true
+        return compareSemantic(cleanTag, cleanInstalled) == 0
+    }
+
+    /**
+     * Returns true whenever the GitHub release tag_name differs from the installed version/tag.
+     */
+    fun isTagUpdateAvailable(
+        installedVersion: String?,
+        githubTagName: String?
     ): Boolean {
-        if (installedVersionName.isNullOrBlank()) return false
-
-        val semanticCmp = compareSemantic(latestVersionName, installedVersionName)
-        if (semanticCmp != null) {
-            return semanticCmp > 0
-        }
-
-        // Fallback to versionCode if versionName cannot be parsed
-        if (apkVersionCode != null && installedVersionCode != null) {
-            return apkVersionCode > installedVersionCode
-        }
-
-        return false
+        val cleanInstalled = cleanVersion(installedVersion)
+        val cleanTag = cleanVersion(githubTagName)
+        if (cleanInstalled.isEmpty() || cleanTag.isEmpty()) return false
+        return !areTagsEqual(cleanInstalled, cleanTag)
     }
 }

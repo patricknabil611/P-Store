@@ -17,8 +17,8 @@ android {
     minSdk = 26
     targetSdk = 34
     // Version scheme: 26.06.26.X where every update increments the patch number (26.06.26.1 -> 26.06.26.2 -> 26.06.26.3)
-    versionCode = 26062601
-    versionName = "26.06.26.1"
+    versionCode = 26062607
+    versionName = "26.06.26.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

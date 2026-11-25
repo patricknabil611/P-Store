@@ -5,8 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
+import com.example.data.repository.PStoreRepository
 import com.example.installer.InstallEvent
 import com.example.installer.InstallEvents
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
 class InstallResultReceiver : BroadcastReceiver() {
@@ -51,7 +55,20 @@ class InstallResultReceiver : BroadcastReceiver() {
                         if (file.exists()) file.delete()
                     } catch (_: Exception) {}
                 }
-                InstallEvents.emit(InstallEvent.Success(packageName, appName, targetVersion, apkPath))
+                val pendingResult = goAsync()
+                val appContext = context.applicationContext
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        if (packageName.isNotBlank() && targetVersion.isNotBlank()) {
+                            PStoreRepository(appContext).saveInstalledTag(packageName, targetVersion)
+                        }
+                    } catch (_: Exception) {
+                        // Best-effort persistence on install completion
+                    } finally {
+                        InstallEvents.emit(InstallEvent.Success(packageName, appName, targetVersion, apkPath))
+                        pendingResult.finish()
+                    }
+                }
             }
 
             PackageInstaller.STATUS_FAILURE_CONFLICT -> {

@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,7 +63,10 @@ import com.example.model.AppItemUiState
 import com.example.model.ReleaseStatus
 import com.example.ui.components.AppBrandIcon
 import com.example.ui.components.AppContextMenu
+import com.example.ui.components.EmptyCatalogCard
 import com.example.ui.components.ErrorActionBox
+import com.example.ui.components.NewAppBadge
+import com.example.ui.components.RateLimitNoticeBanner
 import com.example.ui.theme.PStoreTheme
 import com.example.util.Formatters
 import com.example.util.VersionComparator
@@ -76,13 +80,16 @@ fun MidnightHomeScreen(
     updatingCurrent: Int,
     updatingTotal: Int,
     lastCheckedAtMillis: Long,
+    rateLimitNotice: String?,
     onRefresh: () -> Unit,
+    onAddApp: () -> Unit,
     onOpenApp: (AppItemUiState) -> Unit,
     onInstallOrUpdate: (AppItemUiState) -> Unit,
     onCancelDownload: (AppItemUiState) -> Unit,
     onUpdateAll: () -> Unit,
     onOpenDetail: (AppItemUiState) -> Unit,
     onCopyAppInfo: (AppItemUiState) -> Unit,
+    onHideApp: (AppItemUiState) -> Unit,
     onRetryApp: (AppItemUiState) -> Unit,
     onUninstallApp: (AppItemUiState) -> Unit,
     bottomNavSpacerDp: Int = 104,
@@ -139,51 +146,67 @@ fun MidnightHomeScreen(
                         )
                     }
 
-                    MidnightRefreshButton(
-                        isRefreshing = isRefreshing,
-                        onClick = onRefresh
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MidnightAddButton(onClick = onAddApp)
+                        MidnightRefreshButton(
+                            isRefreshing = isRefreshing,
+                            onClick = onRefresh
+                        )
+                    }
                 }
             }
 
-            // LAUNCH section label
-            item(key = "launch_header") {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = stringResource(R.string.section_launch),
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 12.sp,
-                        letterSpacing = 1.4.sp
-                    ),
-                    color = colors.secondaryText
-                )
+            if (!rateLimitNotice.isNullOrBlank()) {
+                item(key = "midnight_rate_limit") {
+                    RateLimitNoticeBanner(message = rateLimitNotice)
+                }
             }
 
-            // 3-column grid of launch tiles (116dp tall, 22dp radius)
-            items(launcherRows.size, key = { rowIndex -> "launch_row_$rowIndex" }) { rowIndex ->
-                val rowApps = launcherRows[rowIndex]
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    rowApps.forEach { item ->
-                        MidnightLaunchTile(
-                            item = item,
-                            onTap = {
-                                if (item.isInstalled) {
-                                    onOpenApp(item)
-                                } else {
-                                    onInstallOrUpdate(item)
-                                }
-                            },
-                            onOpen = { onOpenApp(item) },
-                            onUpdate = { onInstallOrUpdate(item) },
-                            onCopyInfo = { onCopyAppInfo(item) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    repeat(3 - rowApps.size) {
-                        Spacer(modifier = Modifier.weight(1f))
+            if (launcherApps.isEmpty() && !isRefreshing) {
+                item(key = "midnight_empty_catalog") {
+                    EmptyCatalogCard()
+                }
+            } else {
+                // LAUNCH section label
+                item(key = "launch_header") {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.section_launch),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 12.sp,
+                            letterSpacing = 1.4.sp
+                        ),
+                        color = colors.secondaryText
+                    )
+                }
+
+                // 3-column grid of launch tiles (116dp tall, 22dp radius)
+                items(launcherRows.size, key = { rowIndex -> "launch_row_$rowIndex" }) { rowIndex ->
+                    val rowApps = launcherRows[rowIndex]
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        rowApps.forEach { item ->
+                            MidnightLaunchTile(
+                                item = item,
+                                onTap = {
+                                    if (item.isInstalled) {
+                                        onOpenApp(item)
+                                    } else {
+                                        onInstallOrUpdate(item)
+                                    }
+                                },
+                                onOpen = { onOpenApp(item) },
+                                onUpdate = { onInstallOrUpdate(item) },
+                                onCopyInfo = { onCopyAppInfo(item) },
+                                onHide = { onHideApp(item) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        repeat(3 - rowApps.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -234,7 +257,7 @@ fun MidnightHomeScreen(
             }
 
             // App update cards
-            items(updateListApps, key = { it.packageName }) { item ->
+            items(updateListApps, key = { it.id }) { item ->
                 MidnightUpdateCard(
                     item = item,
                     onClick = { onOpenDetail(item) },
@@ -242,6 +265,7 @@ fun MidnightHomeScreen(
                     onInstallOrUpdate = { onInstallOrUpdate(item) },
                     onCancelDownload = { onCancelDownload(item) },
                     onCopyInfo = { onCopyAppInfo(item) },
+                    onHide = { onHideApp(item) },
                     onRetry = { onRetryApp(item) },
                     onUninstall = { onUninstallApp(item) }
                 )
@@ -304,6 +328,31 @@ fun MidnightRefreshButton(
     }
 }
 
+@Composable
+fun MidnightAddButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = PStoreTheme.colors
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = colors.accent,
+        modifier = modifier
+            .size(44.dp)
+            .testTag("midnight_add_app_button")
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = stringResource(R.string.cd_add_app),
+                tint = colors.onAccent,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MidnightLaunchTile(
@@ -312,10 +361,12 @@ private fun MidnightLaunchTile(
     onOpen: () -> Unit,
     onUpdate: () -> Unit,
     onCopyInfo: () -> Unit,
+    onHide: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = PStoreTheme.colors
     var menuExpanded by remember { mutableStateOf(false) }
+    val isNew = remember(item.catalogApp.firstDiscoveredAtMillis) { item.isNewlyDiscovered() }
 
     Box(modifier = modifier) {
         Surface(
@@ -334,34 +385,44 @@ private fun MidnightLaunchTile(
                     onLongClick = { menuExpanded = true }
                 )
                 .alpha(if (item.isInstalled) 1f else 0.62f)
-                .testTag("launch_tile_${item.packageName}")
+                .testTag("launch_tile_${item.id}")
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp, vertical = 10.dp)
-            ) {
-                AppBrandIcon(
-                    app = item.catalogApp,
-                    size = 52.dp,
-                    cornerRadius = 15.dp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = item.catalogApp.displayName,
-                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-                    color = colors.primaryText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (!item.isInstalled) {
-                    Spacer(modifier = Modifier.height(2.dp))
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                ) {
+                    AppBrandIcon(
+                        app = item.catalogApp,
+                        size = 52.dp,
+                        cornerRadius = 15.dp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = stringResource(R.string.action_install),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.accent
+                        text = item.catalogApp.displayName,
+                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                        color = colors.primaryText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!item.isInstalled) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.action_install),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.accent
+                        )
+                    }
+                }
+
+                if (isNew) {
+                    NewAppBadge(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 6.dp)
                     )
                 }
             }
@@ -373,7 +434,8 @@ private fun MidnightLaunchTile(
             onDismiss = { menuExpanded = false },
             onOpen = onOpen,
             onUpdate = onUpdate,
-            onCopyInfo = onCopyInfo
+            onCopyInfo = onCopyInfo,
+            onHide = onHide
         )
     }
 }
@@ -387,6 +449,7 @@ fun MidnightUpdateCard(
     onInstallOrUpdate: () -> Unit,
     onCancelDownload: () -> Unit,
     onCopyInfo: () -> Unit,
+    onHide: () -> Unit,
     onRetry: () -> Unit,
     onUninstall: () -> Unit,
     showReleaseNotesPreview: Boolean = false,
@@ -394,6 +457,7 @@ fun MidnightUpdateCard(
 ) {
     val colors = PStoreTheme.colors
     var menuExpanded by remember { mutableStateOf(false) }
+    val isNew = remember(item.catalogApp.firstDiscoveredAtMillis) { item.isNewlyDiscovered() }
     val title = if (item.catalogApp.isSelf) {
         stringResource(R.string.pstore_this_app)
     } else {
@@ -412,7 +476,7 @@ fun MidnightUpdateCard(
                     onClick = onClick,
                     onLongClick = { menuExpanded = true }
                 )
-                .testTag("midnight_card_${item.packageName}")
+                .testTag("midnight_card_${item.id}")
         ) {
             Column(
                 modifier = Modifier
@@ -432,13 +496,22 @@ fun MidnightUpdateCard(
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = colors.primaryText,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = colors.primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (isNew) {
+                                NewAppBadge()
+                            }
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = buildMidnightStatusLine(item),
@@ -516,7 +589,8 @@ fun MidnightUpdateCard(
             onDismiss = { menuExpanded = false },
             onOpen = onOpen,
             onUpdate = onInstallOrUpdate,
-            onCopyInfo = onCopyInfo
+            onCopyInfo = onCopyInfo,
+            onHide = onHide
         )
     }
 }
@@ -556,6 +630,7 @@ private fun MidnightCardActionSlot(
                 }
             }
         }
+        is AppActionState.CheckingUpdate,
         is AppActionState.Verifying,
         is AppActionState.Installing -> {
             Box(
@@ -641,11 +716,12 @@ private fun buildMidnightStatusLine(item: AppItemUiState): String {
         val total = Formatters.formatFileSizeAlwaysMb(action.totalBytes)
         return stringResource(R.string.status_downloading_detail, dl, total)
     }
+    if (action is AppActionState.CheckingUpdate) return stringResource(R.string.status_checking_update)
     if (action is AppActionState.Verifying) return stringResource(R.string.status_verifying)
     if (action is AppActionState.Installing) return stringResource(R.string.status_installing)
 
     val release = item.latestRelease
-    val installedVer = VersionComparator.cleanVersion(item.installedVersionName)
+    val installedVer = VersionComparator.cleanVersion(item.effectiveInstalledVersion)
     return when {
         item.releaseStatus is ReleaseStatus.Loading && release == null -> {
             stringResource(R.string.status_checking)
